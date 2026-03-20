@@ -4,6 +4,50 @@
 
 ---
 
+## [2026-03-21 01:50] - Logout в auth-модалке
+
+**Type:** feature
+
+**What changed:**
+- Кнопка auth в шапке больше не блокируется после входа: при клике авторизованный пользователь открывает модалку состояния аккаунта.
+- В `LoginModal` добавлен экран «Аккаунт» с текущим email и кнопкой «Выйти», которая очищает локальную auth-сессию через существующий `logout()` в Zustand store.
+- После logout UI возвращается в гостевое состояние: токен и пользователь удаляются из `localStorage`, а кнопка снова показывает «Войти».
+
+**Why it changed:**
+- Требовалось добавить минимальную logout-функциональность без отдельного backend endpoint и без редизайна существующего auth UI.
+
+**Files touched:**
+- `front/src/components/LoginButton.tsx`
+- `front/src/components/LoginModal.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21 01:43] - Подключение auth UI к backend auth
+
+**Type:** feature
+
+**What changed:**
+- Добавлены `authApi` и `authStore` на Zustand для входа, регистрации, хранения `{ user, token }` и восстановления сессии через `GET /auth/me`.
+- `LoginModal` подключена к backend-эндпоинтам `POST /auth/login` и `POST /auth/register`: формы теперь отправляют данные, показывают loading/error-состояния и закрываются при успешной авторизации.
+- `LoginButton` теперь реагирует на auth state: после успешного входа показывает email пользователя вместо текста «Войти».
+- В `App.tsx` добавлена инициализация auth-сессии при старте приложения.
+
+**Why it changed:**
+- Требовалось подключить существующий UI входа/регистрации к backend auth без редизайна и с минимальными безопасными изменениями.
+
+**Files touched:**
+- `front/src/features/auth/authApi.ts`
+- `front/src/features/auth/authStore.ts`
+- `front/src/components/LoginModal.tsx`
+- `front/src/components/LoginButton.tsx`
+- `front/src/App.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
 ## [2026-03-21 00:13] - Цвет кнопки «Войти» и соцвход Яндекс / ОК
 
 **Type:** style
