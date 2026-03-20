@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Light.otf') format('opentype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Bold.otf') format('opentype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Black_0.otf') format('opentype');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Light Italic.otf') format('opentype');
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Italic.otf') format('opentype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Medium Italic.otf') format('opentype');
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'AA Stetica';
+  src: url('../assets/fonts/AA Stetica Bold Italic.otf') format('opentype');
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+@theme {
+  --font-display: 'AA Stetica', system-ui, sans-serif;
+  --color-kr-blue: #4385f5;
+  --color-kr-blue-deep: #3b82f6;
+  --color-kr-lime: #c1ff2c;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-family: var(--font-display);
+}
+
+#root {
+  min-height: 100dvh;
+}
