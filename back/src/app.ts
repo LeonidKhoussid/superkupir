@@ -1,10 +1,12 @@
 import express from "express";
+import swaggerUi from "swagger-ui-express";
 
 import { errorHandler, notFoundHandler } from "./lib/errors";
 import { authRouter } from "./modules/auth/auth.module";
 import { healthRouter } from "./modules/health/health.routes";
 import { placeInteractionsRouter } from "./modules/place-interactions/place-interactions.module";
 import { placesRouter } from "./modules/places/places.module";
+import { openApiSpec } from "./swagger/openapi-spec";
 
 export const createApp = () => {
   const app = express();
@@ -28,6 +30,10 @@ export const createApp = () => {
     next();
   });
   app.use(express.json());
+  app.get("/openapi.json", (_request, response) => {
+    response.status(200).json(openApiSpec);
+  });
+  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
   app.use("/places", placesRouter);
