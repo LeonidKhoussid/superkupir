@@ -1,3 +1,32 @@
+[2026-03-21 04:36] - Add backend places read endpoints
+
+Type: feature
+
+What changed:
+	•	Added an isolated backend `places` module with repository, service, controller, routes, and module wiring for reading the current `wineries` dataset.
+	•	Added `GET /places` with stable `id ASC` ordering plus validated support for `limit`, `offset`, `q`, `name`, `location`, and `source_location`.
+	•	Added `GET /places/:id` using the internal numeric DB `id` and returning `404` when the record is missing.
+	•	Normalized `photo_urls` responses to arrays of strings, returning `[]` when the DB value is null or not a valid JSON array.
+	•	Wired the new router into `src/app.ts` and verified `npm run check` and `npm run build`.
+
+Why it changed:
+	•	The frontend will need a clean backend read API for the already imported winery/place dataset, but this task needed to stay isolated to backend-only dataset access.
+	•	Using a dedicated `places` read module keeps the current dataset accessible without changing auth, frontend code, or the underlying DB schema.
+
+Files touched:
+	•	back/src/app.ts
+	•	back/src/modules/places/places.types.ts
+	•	back/src/modules/places/places.schemas.ts
+	•	back/src/modules/places/places.repository.ts
+	•	back/src/modules/places/places.service.ts
+	•	back/src/modules/places/places.controller.ts
+	•	back/src/modules/places/places.routes.ts
+	•	back/src/modules/places/places.module.ts
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+
+⸻
+
 ## [2026-03-21 04:20] - Add winery dataset table and CSV import flow
 
 **Type:** feature

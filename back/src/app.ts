@@ -3,6 +3,7 @@ import express from "express";
 import { errorHandler, notFoundHandler } from "./lib/errors";
 import { authRouter } from "./modules/auth/auth.module";
 import { healthRouter } from "./modules/health/health.routes";
+import { placesRouter } from "./modules/places/places.module";
 
 export const createApp = () => {
   const app = express();
@@ -22,6 +23,7 @@ export const createApp = () => {
   app.use(express.json());
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
+  app.use("/places", placesRouter);
   app.use(notFoundHandler);
   app.use(errorHandler);
 

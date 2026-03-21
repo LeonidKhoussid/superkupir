@@ -29,6 +29,7 @@
 - `src/scripts/import-wineries.ts`: backend-only CSV importer for the current winery dataset; applies the wineries table SQL and then upserts rows.
 - `src/modules/auth/*`: isolated auth module.
 - `src/modules/health/*`: simple health route.
+- `src/modules/places/*`: isolated read-only places module for listing and fetching the current winery dataset.
 - `sql/create_wineries_table.sql`: SQL bootstrap for the current winery dataset table.
 
 # Implemented modules
@@ -43,7 +44,10 @@
 - Winery dataset bootstrap:
   - SQL table bootstrap in `sql/create_wineries_table.sql`
   - CSV import command in `npm run db:import:wineries`
-  - no API routes yet; this is storage/import only
+- Places dataset API:
+  - `GET /places`
+  - `GET /places/:id`
+  - repository/service/controller/routes live in `src/modules/places`
 
 # Current auth flow
 
@@ -76,6 +80,8 @@
 - `POST /auth/register`
 - `POST /auth/login`
 - `GET /auth/me`
+- `GET /places`
+- `GET /places/:id`
 - Browser access is currently allowed via basic `Access-Control-Allow-*` headers in `src/app.ts`
 
 # Current winery dataset storage
@@ -109,6 +115,32 @@
 - Field decisions:
   - `external_id` stays `TEXT`, not integer, because source IDs contain leading zeroes like `001`
   - `photo_urls` is stored as `JSONB` array, parsed from the CSV semicolon-delimited string
+
+# Current places API
+
+- Base dataset source:
+  - reads from the `wineries` table created by `sql/create_wineries_table.sql`
+- List endpoint:
+  - `GET /places`
+  - returns `{ items, total, limit, offset }`
+  - default behavior with no query params:
+    - returns all currently available rows in stable `id ASC` order
+    - response `limit` is the count of rows returned in that response
+  - supported query params:
+    - `limit`: integer `1..100`
+    - `offset`: integer `>= 0`
+    - `q`: simple `ILIKE` search across `name`, `description`, and `source_location`
+    - `name`: partial `ILIKE` filter on `name`
+    - `location`: partial `ILIKE` filter on `source_location`
+    - `source_location`: alias for the same `source_location` filter; if both alias params are present, `source_location` wins
+- Detail endpoint:
+  - `GET /places/:id`
+  - uses the internal numeric DB `id`, not `external_id`
+  - returns one place object or `404` if not found
+- Response shape:
+  - fields are exposed in snake_case to match the current dataset naming: `external_id`, `source_location`, `card_url`, `logo_url`, `photo_urls`, `coordinates_raw`
+  - `photo_urls` is always returned as an array of strings
+  - when the DB value is null or malformed, `photo_urls` falls back to `[]`
 
 # Winery import approach
 
@@ -182,14 +214,17 @@
 - Logout is currently client-side only; existing JWTs are not invalidated server-side.
 - The winery import flow is only dry-run verified so far; actual table creation/import is blocked by the same PostgreSQL `ECONNREFUSED` connectivity problem.
 - The current winery table is intentionally raw and source-shaped; duplicated text in `description` and source-specific formatting in `size` are preserved as-is for now.
-- The winery dataset is stored via raw SQL only right now; no Prisma model or API layer has been added for it yet.
+- The winery dataset is stored via raw SQL only right now; the new API layer also uses raw SQL and no Prisma model has been added for it yet.
+- The places API currently supports only basic list/detail/filter behavior; no geospatial filtering, sorting options, or route generation logic has been added.
+- `/places/:id` uses internal DB ids, so clients that only know `external_id` must first fetch the list or add a future external-id lookup route.
 
 # Pending tasks
 
 - Apply `sql/create_auth_tables.sql` to the target PostgreSQL database.
 - Apply `sql/create_wineries_table.sql` and run `npm run db:import:wineries` once PostgreSQL is reachable.
 - Add automated integration tests for register/login/me flows.
-- Decide when to expose the imported winery data through backend read endpoints.
+- Add automated endpoint tests for `GET /places` and `GET /places/:id` once PostgreSQL is reachable.
+- Connect the frontend to the new backend `GET /places` and `GET /places/:id` endpoints later.
 - Expand or normalize the winery schema later only after the broader product data model is agreed.
 - Add future auth providers behind the provider layer without changing controller contracts or the current frontend store API.
 - Add a backend logout/session invalidation endpoint only if the project later needs server-side session control or refresh tokens.
@@ -206,6 +241,8 @@
 - The current winery dataset uses a dedicated `wineries` table instead of a generic `places` table because the CSV is winery-specific and the broader place taxonomy is not settled yet.
 - `photo_urls` is stored as `JSONB` because the source field is consistently semicolon-delimited and should remain queryable without inventing a separate child table yet.
 - The winery import is designed as idempotent upsert-by-`external_id` so the same source CSV can be reloaded safely.
+- The backend dataset read API is exposed as `/places` even though the current table name is `wineries`, so the public route can stay broader than the first dataset implementation.
+- `/places/:id` intentionally uses the internal numeric primary key for the first version because it matches the current table shape and keeps lookup logic simple.
 
 # Handoff notes
 
@@ -216,6 +253,8 @@
 - To initialize just the winery table: run `npm run db:init:wineries`.
 - To import the provided CSV dataset: run `npm run db:import:wineries`.
 - To import a different CSV file later with the same structure: run `npm run db:import:wineries -- /absolute/path/to/file.csv`.
+- The current dataset can now be read through `GET /places` and `GET /places/:id`.
+- `GET /places/:id` expects the internal numeric `wineries.id` value.
 - The auth module assumes the database table already exists.
 - Backend-local `.gitignore` ignores `node_modules/`, `dist/`, and `.env`.
 - Frontend auth expects the backend to be reachable at `http://localhost:3000` unless `VITE_API_BASE_URL` is set on the frontend side.
