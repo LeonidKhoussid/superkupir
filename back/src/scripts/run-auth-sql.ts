@@ -37,6 +37,6 @@ const main = async () => {
 
 void main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : "Unknown error";
-  console.error(`Failed to apply auth SQL: ${message}`);
+  console.error(`Failed to apply SQL: ${message}`);
   process.exitCode = 1;
 });

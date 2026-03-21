@@ -7,10 +7,13 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "db:init:auth": "tsx src/scripts/run-auth-sql.ts",
+    "db:init:wineries": "tsx src/scripts/run-auth-sql.ts sql/create_wineries_table.sql",
+    "db:import:wineries": "tsx src/scripts/import-wineries.ts",
     "start": "node dist/server.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
+    "csv-parse": "^5.6.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",

@@ -1,3 +1,29 @@
+## [2026-03-21 04:20] - Add winery dataset table and CSV import flow
+
+**Type:** feature
+
+**What changed:**
+- Added `sql/create_wineries_table.sql` to create a backend-only `wineries` table with timestamps, a unique `external_id`, and a `(lat, lon)` index for the current CSV dataset.
+- Added `src/scripts/import-wineries.ts` plus npm commands for SQL init/import so the provided `scrapping.csv` file can be parsed and upserted into PostgreSQL.
+- Chose `photo_urls` storage as `JSONB`, splitting the source semicolon-delimited string into an array of URLs during import.
+- Generalized the SQL runner error message so the same backend SQL helper can be reused for the wineries table command.
+- Verified `npm run check`, `npm run build`, `npm run db:init:wineries -- --dry-run`, and `npm run db:import:wineries -- --dry-run`.
+
+**Why it changed:**
+- The backend needed a minimal schema and seed/import path for the current winery/location CSV without expanding into the full future product data model.
+- Keeping the import isolated to `back/` avoids merge risk with frontend/mobile work while making the current dataset load repeatable.
+
+**Files touched:**
+- `back/package.json`
+- `back/package-lock.json`
+- `back/sql/create_wineries_table.sql`
+- `back/src/scripts/import-wineries.ts`
+- `back/src/scripts/run-auth-sql.ts`
+- `back/changes_backend.md`
+- `back/memory_backend.md`
+
+---
+
 ## [2026-03-21 01:50] - Document frontend logout integration state
 
 **Type:** chore
