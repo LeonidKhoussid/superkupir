@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "db:init:auth": "tsx src/scripts/run-auth-sql.ts",
+    "db:init:place-interactions": "tsx src/scripts/run-auth-sql.ts sql/create_place_interactions_tables.sql",
     "db:init:wineries": "tsx src/scripts/run-auth-sql.ts sql/create_wineries_table.sql",
     "db:import:wineries": "tsx src/scripts/import-wineries.ts",
     "start": "node dist/server.js"

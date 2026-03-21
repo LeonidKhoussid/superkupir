@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { AUTH_MODAL_OPEN_EVENT } from '../features/auth/authModalEvents'
 import { useAuthStore } from '../features/auth/authStore'
 import { LoginModal } from './LoginModal'
 
@@ -17,6 +18,16 @@ export function LoginButton({ variant = 'on-quiz', className = '' }: Props) {
       ? 'text-[#4385f5]'
       : 'text-[#3b82f6]'
   const label = user ? user.email : 'Войти'
+
+  useEffect(() => {
+    const handleOpenAuthModal = () => {
+      setModalKey((k) => k + 1)
+      setOpen(true)
+    }
+
+    window.addEventListener(AUTH_MODAL_OPEN_EVENT, handleOpenAuthModal)
+    return () => window.removeEventListener(AUTH_MODAL_OPEN_EVENT, handleOpenAuthModal)
+  }, [])
 
   return (
     <>

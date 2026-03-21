@@ -1,3 +1,75 @@
+[2026-03-21 06:31] - Fix browser CORS for unlike and confirm live comments frontend usage
+
+Type: fix
+
+What changed:
+	•	Updated the centralized CORS middleware in `src/app.ts` so browser preflight requests now allow `GET`, `POST`, `DELETE`, and `OPTIONS`, and mirror requested headers such as `authorization` / `content-type`.
+	•	Kept the existing place-interactions route contract unchanged: the frontend now actively uses `DELETE /places/:id/like` for unlike plus `GET /places/:id/comments` and `POST /places/:id/comments` for the new comments modal flow.
+	•	Statically verified `npm run check` and `npm run build`, and runtime-verified the preflight path with an in-process `OPTIONS /places/:id/like` request returning `204` and `Access-Control-Allow-Methods: GET,POST,DELETE,OPTIONS`.
+
+Why it changed:
+	•	The frontend unlike action was failing in the browser before it reached the route handler because backend CORS preflight did not allow `DELETE`.
+	•	Backend documentation also needed to reflect that the frontend now consumes the comments list/create endpoints as real UI behavior rather than comments-count-only hydration.
+
+Files touched:
+	•	back/src/app.ts
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+
+⸻
+
+[2026-03-21 06:16] - Document frontend consumption of place interaction endpoints
+
+Type: chore
+
+What changed:
+	•	Updated backend memory/log files to reflect that the frontend landing carousel now consumes the existing place interaction endpoints without requiring backend code changes in this task.
+	•	Documented the confirmed frontend usage pattern: `GET /places/:id/likes` and `GET /places/:id/comments` for carousel hydration, plus `POST /places/:id/like` / `DELETE /places/:id/like` for like toggles.
+	•	Documented that comments are currently used as count-only data in the carousel, while existing `/places` and `/places/:id` responses remain unchanged and are not enriched with interaction counts.
+
+Why it changed:
+	•	Backend handoff notes need to capture the live frontend dependency on the current place-interactions contract, even though no backend runtime code changed during this frontend integration task.
+
+Files touched:
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+
+⸻
+
+[2026-03-21 05:56] - Add place likes and comments backend
+
+Type: feature
+
+What changed:
+	•	Added `sql/create_place_interactions_tables.sql` with the new `place_likes` and `place_comments` tables, indexes, foreign keys, and an `updated_at` trigger for comments.
+	•	Added a dedicated backend `place-interactions` module with repository, service, controller, routes, and module wiring for likes and comments under `/places/:id/...`.
+	•	Added `POST /places/:id/like`, `DELETE /places/:id/like`, `GET /places/:id/likes`, `GET /places/:id/comments`, and `POST /places/:id/comments`.
+	•	Implemented idempotent like/unlike behavior using `ON CONFLICT DO NOTHING` for likes and delete-if-present for unlikes.
+	•	Added optional auth support for the public likes summary endpoint so it can return `liked_by_current_user` when a valid bearer token is present.
+	•	Kept existing `GET /places` and `GET /places/:id` response shapes unchanged; counts are returned through the new interaction endpoints instead of enriching the existing places payloads.
+	•	Added the npm command `npm run db:init:place-interactions` and verified `npm run check`, `npm run build`, and `npm run db:init:place-interactions -- --dry-run`.
+
+Why it changed:
+	•	The backend needed a minimal interaction layer for the current place dataset so authenticated users can like places and create comments without requiring frontend changes in this task.
+	•	Keeping likes/comments in a dedicated backend module limits merge risk and avoids destabilizing the existing places read API.
+
+Files touched:
+	•	back/package.json
+	•	back/sql/create_place_interactions_tables.sql
+	•	back/src/app.ts
+	•	back/src/modules/auth/auth.middleware.ts
+	•	back/src/modules/place-interactions/place-interactions.types.ts
+	•	back/src/modules/place-interactions/place-interactions.schemas.ts
+	•	back/src/modules/place-interactions/place-interactions.repository.ts
+	•	back/src/modules/place-interactions/place-interactions.service.ts
+	•	back/src/modules/place-interactions/place-interactions.controller.ts
+	•	back/src/modules/place-interactions/place-interactions.routes.ts
+	•	back/src/modules/place-interactions/place-interactions.module.ts
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+
+⸻
+
 [2026-03-21 04:36] - Add backend places read endpoints
 
 Type: feature

@@ -4,6 +4,60 @@
 
 ---
 
+## [2026-03-21 06:31] - Фикс unlike + рабочая comments modal в карусели мест
+
+**Type:** fix
+
+**What changed:**
+- `LandingPlacesCarousel.tsx` обновлена: кнопка комментариев стала реальным action-button, карточка открывает comments modal без навигации, а счётчик комментариев на карточке синхронизируется после загрузки списка и после успешной отправки нового комментария.
+- Добавлен новый компонент `PlaceCommentsModal.tsx`: модалка открывается из карусели, загружает `GET /places/:id/comments`, показывает loading / empty / error / retry состояния, список комментариев, форму отправки и CTA на логин для гостей.
+- `placeInteractionsApi.ts` расширен поддержкой `POST /places/:id/comments`, чтобы фронтенд использовал существующий backend-контракт для создания комментария без отдельного ad-hoc fetch-кода.
+- Like/unlike flow оставлен optimistic, но теперь он реально работает end-to-end в браузере вместе с backend CORS fix для `DELETE`; фронтенд продолжает открывать auth-модалку для гостей и откатывает локальное состояние при ошибке.
+- Проверено: `cd front && npm run lint`, `cd front && npm run build`, `cd back && npm run check`, `cd back && npm run build`, плюс runtime-проверка preflight `OPTIONS /places/:id/like` на backend.
+
+**Why it changed:**
+- Нужно было починить сломанный unlike из браузера и превратить dead comments icon в рабочий UX для просмотра и добавления комментариев без редизайна лендинга.
+
+**Files touched:**
+- `front/src/components/LandingPlacesCarousel.tsx`
+- `front/src/components/PlaceCommentsModal.tsx`
+- `front/src/features/places/placeInteractionsApi.ts`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+- `back/src/app.ts`
+- `back/changes_backend.md`
+- `back/memory_backend.md`
+
+---
+
+## [2026-03-21 06:16] - Карусель мест как recommendation feed с лайками и счётчиком комментариев
+
+**Type:** feature
+
+**What changed:**
+- Добавлен frontend API-слой **`placeInteractionsApi.ts`** для текущего backend-контракта: `GET /places/:id/likes`, `POST /places/:id/like`, `DELETE /places/:id/like`, `GET /places/:id/comments`.
+- Добавлен лёгкий frontend-триггер **`authModalEvents.ts`**: неавторизованный клик по лайку на лендинге открывает уже существующую auth-модалку через `LoginButton`, без нового глобального auth-контекста.
+- **`LandingPlacesCarousel.tsx`** превращена в recommendation feed: после `GET /places` карусель гидратирует лайки/комментарии только для карточек фида, показывает отдельную строку взаимодействий под контентом карточки и слегка увеличивает высоту карточек/скелетонов.
+- Итоговый порядок карточек в карусели теперь такой: **`likes_count DESC` → наличие displayable photo → исходный порядок API**. Если interaction hydration недоступна, карусель остаётся рабочей и фактически падает обратно к photo-first / stable ordering.
+- Кнопка лайка теперь работает как toggle: при наличии токена — optimistic update с rollback на ошибке, блокировка повторного клика на время запроса и синхронизация по ответу backend; при отсутствии токена — чистое сообщение + открытие auth-модалки.
+- Карточки показывают иконку лайка, иконку комментариев и оба счётчика; комментарии в этой версии используются **как fetch-based count only** и не тянут отдельный comments UI на лендинге.
+- Проверено: `npm run lint` и `npm run build`.
+
+**Why it changed:**
+- Требовалось сделать landing places carousel похожей на реальную рекомендательную ленту с backend-backed лайками и comment counts, не ломая существующий фронтенд и без broad refactor.
+
+**Files touched:**
+- `front/src/features/places/placeInteractionsApi.ts`
+- `front/src/features/auth/authModalEvents.ts`
+- `front/src/components/LandingPlacesCarousel.tsx`
+- `front/src/components/LoginButton.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+- `back/changes_backend.md`
+- `back/memory_backend.md`
+
+---
+
 ## [2026-03-21 07:45] - Секция «Каталог на карте»: фиксированная высота, скролл списка, пропорции 32.5% / 5% / 62.5%
 
 **Type:** fix / UX
