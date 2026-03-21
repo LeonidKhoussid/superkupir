@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS auth_users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  is_guide BOOLEAN NOT NULL DEFAULT FALSE,
+  avatar_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT auth_users_email_lowercase CHECK (email = lower(email))

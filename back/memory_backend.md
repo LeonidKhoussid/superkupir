@@ -46,7 +46,11 @@
 - `src/swagger/openapi-spec.ts`
   - OpenAPI 3 spec for the current API surface
 - `sql/create_product_schema.sql`
-  - canonical relational bootstrap
+  - self-contained canonical relational bootstrap
+  - creates `auth_users` plus the canonical product tables
+  - seeds taxonomy tables
+  - migrates legacy `wineries` rows into `places`
+  - repairs legacy `place_likes` / `place_comments` foreign keys to point at `places`
 - `src/scripts/import-places.ts`
   - canonical CSV import into `places`
 
@@ -101,6 +105,8 @@
 
 - Canonical SQL file:
   - `back/sql/create_product_schema.sql`
+- Real canonical init command:
+  - `npm run db:init:product`
 - Canonical current tables:
   - `auth_users`
   - `place_types`
@@ -119,6 +125,13 @@
 - Legacy compatibility table:
   - `wineries`
   - retained only as a migration source / compatibility bridge
+- Helper-only SQL files that remain in the repo:
+  - `back/sql/create_auth_tables.sql`
+    - isolated helper, aligned with canonical `auth_users`
+  - `back/sql/create_place_interactions_tables.sql`
+    - isolated helper, aligned with canonical `places`
+  - `back/sql/create_wineries_table.sql`
+    - legacy helper for the pre-canonical raw winery table
 
 # Current places model
 
@@ -290,6 +303,11 @@
   - `npm run db:import:places -- --dry-run`
 - Import source:
   - `/Users/leo/Downloads/scrapping.csv`
+- Canonical bootstrap status:
+  - `create_product_schema.sql` is now self-contained for a fresh product DB
+  - it no longer depends on running `db:init:auth` first
+  - the documented canonical schema and the actual SQL/bootstrap files are now aligned
+  - helper SQL files still exist, but they are no longer the primary init path
 - Import behavior:
   - upserts into `places`
   - uses the seeded `winery` place type
@@ -348,7 +366,8 @@
 # Known limitations
 
 - No formal migration framework yet; canonical DB setup is still raw SQL bootstrap.
-- Legacy databases that already created `place_likes` / `place_comments` against `wineries` may need a manual FK migration if strict canonical referential integrity is required.
+- Legacy databases still need the canonical bootstrap to be executed so the FK repair steps can move `place_likes` / `place_comments` onto canonical `places`.
+- Until `npm run db:init:product` is actually applied against a live database, the documented canonical structure should be treated as SQL-complete and dry-run-verified rather than DB-executed in this workspace.
 - Legacy winery source data does not contain real season metadata, so all seasons are attached during import as a temporary compatibility decision.
 - `POST /routes/from-quiz` is a persistence wrapper around a placeholder route-generation boundary, not a real ML integration.
 - No realtime collaboration or websocket merge resolution exists; route conflicts are handled by optimistic locking only.
@@ -382,6 +401,8 @@
   - `npm run build`
   - `npm run db:init:product -- --dry-run`
   - `npm run db:import:places -- --dry-run`
+  - `npm run db:init:auth -- --dry-run`
+  - `npm run db:init:place-interactions -- --dry-run`
   - Node app startup sanity via `createApp()`
   - OpenAPI load sanity from built output
   - in-process CORS preflight sanity for `PATCH`

@@ -3,13 +3,38 @@
 ## Canonical backend schema
 
 - Canonical bootstrap SQL: `back/sql/create_product_schema.sql`
+- Canonical init command: `npm run db:init:product`
 - Canonical CSV import: `back/src/scripts/import-places.ts`
+- Canonical import command: `npm run db:import:places`
 - Canonical runtime place table: `places`
 - Runtime API docs:
   - `GET /openapi.json`
   - `GET /api-docs`
 
+The canonical bootstrap is now self-contained:
+- it creates `auth_users`
+- it creates all canonical product tables
+- it seeds `place_types` and `seasons`
+- it migrates legacy `wineries` rows into `places`
+- it re-points existing `place_likes` / `place_comments` foreign keys to `places`
+
 The backend runtime no longer treats `wineries` as the primary application table. `wineries` is now a legacy import source and compatibility bridge only. New backend code reads from `places`, `place_seasons`, `routes`, `posts`, and the other canonical product tables.
+
+## Canonical vs helper SQL files
+
+Canonical:
+- `back/sql/create_product_schema.sql`
+
+Helper / legacy-support SQL:
+- `back/sql/create_auth_tables.sql`
+  - still available for isolated auth table bootstrap
+  - now aligned with the canonical `auth_users` shape
+- `back/sql/create_place_interactions_tables.sql`
+  - still available for isolated place-interactions bootstrap
+  - now aligned with canonical `places`
+- `back/sql/create_wineries_table.sql`
+  - legacy helper for the original raw winery table only
+  - not part of the canonical runtime schema
 
 ## Table list
 
@@ -30,6 +55,7 @@ Key columns:
 Important notes:
 - Extended in place instead of creating a separate product user table.
 - `is_guide` is used by the posts/inspiration filtering.
+- The canonical bootstrap now creates this table directly, so a fresh product init does not depend on `create_auth_tables.sql`.
 
 ### `place_types`
 
@@ -467,7 +493,7 @@ Current role:
 ## Known limitations
 
 - ML route generation is still a placeholder boundary. `POST /routes/from-quiz` stores the route but does not call a real ML service yet.
-- Legacy databases that already have `place_likes` / `place_comments` created against `wineries` may need a manual FK migration if full canonical referential integrity is required.
+- Legacy databases still need the canonical bootstrap to be executed for the FK repair steps to run. Until `npm run db:init:product` is actually applied against that database, old `place_likes` / `place_comments` constraints may still point at `wineries`.
 - Legacy winery imports attach all four seeded seasons because the source CSV does not include explicit season data.
 - No formal migration framework exists yet. The canonical bootstrap is still raw SQL-based.
 - Live DB runtime verification remains limited by the existing PostgreSQL connectivity issue; current verification is compile-time and dry-run based.

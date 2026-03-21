@@ -2,6 +2,20 @@ BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+CREATE TABLE IF NOT EXISTS auth_users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  is_guide BOOLEAN NOT NULL DEFAULT FALSE,
+  avatar_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT auth_users_email_lowercase CHECK (email = lower(email))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS auth_users_email_unique_idx
+  ON auth_users (email);
+
 CREATE OR REPLACE FUNCTION set_row_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -322,6 +336,40 @@ BEGIN
     ON CONFLICT (place_id, season_id) DO NOTHING;
   END IF;
 END $$;
+
+ALTER TABLE IF EXISTS place_likes
+DROP CONSTRAINT IF EXISTS place_likes_place_id_fkey;
+
+ALTER TABLE IF EXISTS place_likes
+DROP CONSTRAINT IF EXISTS place_likes_user_id_fkey;
+
+ALTER TABLE IF EXISTS place_likes
+ADD CONSTRAINT place_likes_place_id_fkey
+FOREIGN KEY (place_id) REFERENCES places(id) ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS place_likes
+ADD CONSTRAINT place_likes_user_id_fkey
+FOREIGN KEY (user_id) REFERENCES auth_users(id) ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS place_comments
+DROP CONSTRAINT IF EXISTS place_comments_place_id_fkey;
+
+ALTER TABLE IF EXISTS place_comments
+DROP CONSTRAINT IF EXISTS place_comments_user_id_fkey;
+
+ALTER TABLE IF EXISTS place_comments
+ADD CONSTRAINT place_comments_place_id_fkey
+FOREIGN KEY (place_id) REFERENCES places(id) ON DELETE CASCADE;
+
+ALTER TABLE IF EXISTS place_comments
+ADD CONSTRAINT place_comments_user_id_fkey
+FOREIGN KEY (user_id) REFERENCES auth_users(id) ON DELETE CASCADE;
+
+DROP TRIGGER IF EXISTS set_auth_users_updated_at ON auth_users;
+CREATE TRIGGER set_auth_users_updated_at
+BEFORE UPDATE ON auth_users
+FOR EACH ROW
+EXECUTE FUNCTION set_row_updated_at();
 
 DROP TRIGGER IF EXISTS set_place_types_updated_at ON place_types;
 CREATE TRIGGER set_place_types_updated_at

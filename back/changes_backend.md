@@ -1,3 +1,29 @@
+[2026-03-21 22:41] - Make the canonical DB bootstrap self-contained and resolve legacy SQL conflicts
+
+Type: fix
+
+What changed:
+	•	Corrected `back/sql/create_product_schema.sql` so the canonical bootstrap now creates `auth_users` itself, not just the product tables that depended on it.
+	•	Added canonical bootstrap repair steps that re-point existing `place_likes` and `place_comments` foreign keys to `places`, so legacy interaction tables no longer stay bound to `wineries` after the canonical schema is applied.
+	•	Updated `back/sql/create_auth_tables.sql` so the standalone auth helper now matches the documented auth schema with `is_guide` and `avatar_url`.
+	•	Updated `back/sql/create_place_interactions_tables.sql` so the standalone interaction helper now references canonical `places` instead of legacy `wineries`.
+	•	Confirmed that the real canonical DB init path remains `npm run db:init:product`, while `db:init:auth`, `db:init:place-interactions`, and `db:init:wineries` remain as helper/legacy scripts rather than the primary product bootstrap.
+	•	Verified `npm run check`, `npm run build`, `npm run db:init:product -- --dry-run`, `npm run db:import:places -- --dry-run`, `npm run db:init:auth -- --dry-run`, `npm run db:init:place-interactions -- --dry-run`, built OpenAPI loading, app startup sanity, and in-process `PATCH` preflight support.
+
+Why it changed:
+	•	The previously documented canonical architecture was not fully real on a fresh database because the canonical product SQL still depended on the older auth bootstrap.
+	•	Legacy helper SQL also still contained conflicting references to `wineries`, which would leave place-interaction FKs inconsistent with the documented canonical schema.
+
+Files touched:
+	•	back/sql/create_product_schema.sql
+	•	back/sql/create_auth_tables.sql
+	•	back/sql/create_place_interactions_tables.sql
+	•	back/backend_db_structure.md
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+
+⸻
+
 [2026-03-21 21:29] - Redesign backend schema and route architecture for product flows
 
 Type: feature
