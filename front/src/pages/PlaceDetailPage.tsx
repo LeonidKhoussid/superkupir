@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { fetchSeasons } from '../features/catalog/catalogApi'
 import {
   fetchPlaceById,
+  getPrimaryDisplayPhotoUrl,
   PlacesApiError,
   type PublicPlace,
 } from '../features/places/placesApi'
+import { useRouteCartStore } from '../features/routeCart/routeCartStore'
 
 function BadIdView() {
   return (
@@ -13,7 +16,7 @@ function BadIdView() {
         Некорректная ссылка
       </p>
       <Link
-        to="/#places"
+        to="/places"
         className="mt-6 inline-block rounded-full bg-[#4385f5] px-8 py-3 font-bold text-white"
       >
         К каталогу мест
@@ -22,10 +25,47 @@ function BadIdView() {
   )
 }
 
+function useHistoryBackOrFallback(fallbackTo: string) {
+  const navigate = useNavigate()
+  return useCallback(() => {
+    const st = window.history.state as { idx?: number } | null | undefined
+    if (typeof st?.idx === 'number' && st.idx > 0) {
+      navigate(-1)
+      return
+    }
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      navigate(-1)
+      return
+    }
+    navigate(fallbackTo)
+  }, [navigate, fallbackTo])
+}
+
 function PlaceDetailLoaded({ id }: { id: number }) {
+  const goBack = useHistoryBackOrFallback('/places')
   const [phase, setPhase] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading')
   const [place, setPlace] = useState<PublicPlace | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const [defaultSeasonSlug, setDefaultSeasonSlug] = useState<string | null>(null)
+
+  const selectedIds = useRouteCartStore((s) => s.selectedIds)
+  const addPlace = useRouteCartStore((s) => s.addPlace)
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchSeasons()
+      .then((rows) => {
+        if (cancelled) return
+        setDefaultSeasonSlug(rows[0]?.slug ?? null)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setDefaultSeasonSlug(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -73,7 +113,7 @@ function PlaceDetailLoaded({ id }: { id: number }) {
           Возможно, запись удалена или указан неверный id.
         </p>
         <Link
-          to="/#places"
+          to="/places"
           className="mt-8 inline-block rounded-full bg-[#4385f5] px-8 py-3 font-bold text-white"
         >
           Назад к каталогу
@@ -88,10 +128,10 @@ function PlaceDetailLoaded({ id }: { id: number }) {
         <p className="font-display text-lg font-bold text-red-800">Ошибка</p>
         <p className="mt-2 text-neutral-600">{errorMessage}</p>
         <Link
-          to="/#places"
+          to="/places"
           className="mt-8 inline-block rounded-full bg-[#4385f5] px-8 py-3 font-bold text-white"
         >
-          На главную
+          К каталогу мест
         </Link>
       </div>
     )
@@ -99,22 +139,25 @@ function PlaceDetailLoaded({ id }: { id: number }) {
 
   if (!place) return null
 
-  const heroPhoto = place.photo_urls[0]
+  const heroPhoto = getPrimaryDisplayPhotoUrl(place)
   const region =
     place.source_location?.trim() ||
     place.address?.trim() ||
     'Краснодарский край'
+  const inRouteCart = selectedIds.includes(place.id)
 
   return (
     <div className="min-h-dvh bg-white text-neutral-900">
       <header className="border-b border-slate-100 bg-neutral-50/80 px-5 py-4 backdrop-blur-sm sm:px-8 lg:px-14">
         <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-4">
-          <Link
-            to="/#places"
+          <button
+            type="button"
+            onClick={goBack}
             className="text-[14px] font-semibold text-[#4385f5] underline-offset-2 hover:underline"
+            aria-label="Вернуться на предыдущую страницу"
           >
-            ← К каталогу мест
-          </Link>
+            ← Назад
+          </button>
           <Link
             to="/"
             className="font-display text-[18px] font-bold uppercase text-[#4385f5]"
@@ -149,6 +192,25 @@ function PlaceDetailLoaded({ id }: { id: number }) {
         <h1 className="font-display mt-2 text-[clamp(1.5rem,4vw,2.25rem)] font-bold uppercase leading-tight tracking-wide">
           {place.name}
         </h1>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => addPlace(place, { defaultSeasonSlug })}
+            className={`font-display inline-flex min-h-11 items-center justify-center rounded-full px-8 text-[13px] font-bold uppercase tracking-wide transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kr-blue ${
+              inRouteCart
+                ? 'bg-kr-blue text-white ring-2 ring-kr-blue/30'
+                : 'border-2 border-kr-blue bg-white text-kr-blue hover:bg-sky-50'
+            }`}
+          >
+            {inRouteCart ? 'В маршруте — добавлено' : 'В маршрут'}
+          </button>
+          <Link
+            to="/places"
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-slate-200 px-6 text-[13px] font-semibold text-neutral-600 transition hover:bg-slate-50"
+          >
+            К каталогу и подборке
+          </Link>
+        </div>
         {place.size ? (
           <p className="mt-3 text-[13px] font-medium uppercase tracking-wide text-neutral-400">
             {place.size}

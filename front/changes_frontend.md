@@ -4,6 +4,113 @@
 
 ---
 
+## [2026-03-21] - Конструктор маршрута на `/places` (корзина + рекомендации + создание маршрута)
+
+**Type:** feature
+
+**What changed:**
+- **`placesApi.ts`:** расширен **`PublicPlace`** полями контракта backend (`season_slugs`, `type_slug`, `short_description`, оценки и т.д.); **`parsePublicPlace`** принимает `external_id` как строку или пустую строку при отсутствии; добавлены **`PublicPlaceRecommendation`**, **`parsePublicPlaceRecommendation`**, **`fetchPlaceRecommendations`** — `POST /places/recommendations` (публичный).
+- **`catalogApi.ts`:** **`fetchSeasons`** — `GET /seasons` для fallback сезона и привязки `season_id` к slug.
+- **`routesApi.ts`:** **`createRouteFromSelection`** (`POST /routes` с `creation_mode: selection_builder`), **`fetchUserRouteById`**, парсинг **`UserRouteDetail`**.
+- **`routeCartStore.ts`:** Zustand + persist в **`sessionStorage`** — выбранные места, якорь, активный сезон (slug/id), статусы рекомендаций и ошибок создания маршрута.
+- **`PlacesCatalogPage.tsx`:** кнопка «в маршрут» на карточке; после старта конструктора — блок контекста, секции «В маршруте», «Рекомендации для вашего маршрута» (debounce запроса), «Ещё из каталога»; липкая панель корзины с чипами, сбросом и **«Создать маршрут»** (гость → `requestAuthModalOpen`, авторизованный → `POST /routes` → сброс корзины → переход на **`/routes/:id`**).
+- **`PlaceDetailPage.tsx`:** кнопка **«В маршрут»** / состояние «В маршруте», ссылка в каталог; подгрузка сезонов для fallback slug.
+- **`RouteDetailPage.tsx`**, **`App.tsx`:** маршрут **`/routes/:id`** — просмотр созданного маршрута (`GET /routes/:id`) или экран входа без токена.
+- Обновлены **`front/changes_frontend.md`**, **`front/memory_frontend.md`**.
+
+**Why it changed:**
+- Нужен frontend-only сценарий подборки маршрута: рекомендации рядом с якорем и по сезону через поддержанный API, сохранение маршрута через существующий **`POST /routes`**.
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/src/features/catalog/catalogApi.ts`
+- `front/src/features/routes/routesApi.ts`
+- `front/src/features/routeCart/routeCartStore.ts`
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/src/pages/PlaceDetailPage.tsx`
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/src/App.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint`, `cd front && npm run build` — успешно.
+
+---
+
+## [2026-03-21] - Каталог `/places`: limit запроса 24 и более высокие карточки
+
+**Type:** UX / polish
+
+**What changed:**
+- **`placesApi.ts`:** константа **`PLACES_CATALOG_FETCH_LIMIT = 24`**; **`fetchAllPlaces(options?: { pageLimit?: number })`** — при вызове с **`pageLimit`** каждый `GET /places` использует этот limit (сжатие в диапазон 1…`PLACES_LIST_MAX_LIMIT`). Каталог вызывает **`fetchAllPlaces({ pageLimit: PLACES_CATALOG_FETCH_LIMIT })`**.
+- **`PlacesCatalogPage.tsx`:** блок медиа карточки — **`aspect-[3/4]`** + **`min-h`** по брейкпоинтам; нижний градиент и текст чуть просторнее (**`pt-16`**, **`pb-5`**, описание **`line-clamp-3`**); скелетоны согласованы по пропорциям.
+
+**Why it changed:**
+- Пагинация каталога фиксированным размером страницы 24; карточки визуально выше и менее тесные.
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint`, `cd front && npm run build` — успешно.
+
+---
+
+## [2026-03-21] - Каталог: порядок по уникальности фото; деталь места: «Назад» по истории
+
+**Type:** fix / UX
+
+**What changed:**
+- **`placesApi.ts`:** добавлены **`getPrimaryDisplayPhotoUrl`** (первый `photo_urls[0]` после trim, как у карточки), **`orderPlacesByCatalogImagePriority`** — порядок: уникальный primary URL → тот же URL у нескольких мест → без фото; внутри групп сохраняется исходный порядок. **`placeHasDisplayablePhoto`** сведён к проверке `getPrimaryDisplayPhotoUrl`.
+- **`PlacesCatalogPage`:** после фильтра поиска список проходит через **`orderPlacesByCatalogImagePriority`**; **`CatalogCardImage`** берёт URL через **`getPrimaryDisplayPhotoUrl`** (в т.ч. пробелы в первом элементе).
+- **`PlaceDetailPage`:** кнопка **«← Назад»** вызывает **`navigate(-1)`**, если в **`history.state.idx`** (React Router) есть индекс > 0 или **`window.history.length > 1`**; иначе **`navigate('/places')`**. Ссылки с экранов ошибки / не найдено / плохой id ведут на **`/places`** вместо `/#places`. Hero-фото на детали через **`getPrimaryDisplayPhotoUrl`**.
+
+**Why it changed:**
+- Витрина каталога должна поднимать карточки с уникальными картинками; «Назад» с детали не должен жёстко вести на лендинг.
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/src/pages/PlaceDetailPage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint`, `cd front && npm run build` — успешно.
+
+---
+
+## [2026-03-21] - Страница каталога мест `/places`
+
+**Type:** feature
+
+**What changed:**
+- Добавлена страница **`PlacesCatalogPage`**: маршрут **`/places`** (в `App.tsx` объявлен **до** `/places/:id`, детальная карточка не затронута). Шапка с логотипом, навигация (Места / Впечатления → `/#places` / Как это работает → `/#how`), кнопка входа варианта **`on-catalog`** (синяя кнопка, белый текст). Блок: заголовок «Места Краснодарского края», справа поле **«Поиск по названию»** с иконкой, сетка карточек (1–4 колонки), фон `#e8f4fc`. Карточка: фото или плейсхолдер, опциональный бейдж (`size` или первая часть `source_location`), декоративное «сердце», градиент снизу, название и усечённое описание; клик ведёт на **`/places/:id`**.
+- В **`placesApi.ts`**: константа **`PLACES_LIST_MAX_LIMIT`** (100) и функция **`fetchAllPlaces()`** — последовательные запросы `GET /places` с пагинацией, дедуп по `id`, пока не покрыт `total`.
+- В **`LandingPage`**: пункт **«Места»** в hero-навигации — **`Link to="/places"`** вместо якоря `#places`. Восстановлен рендер **`PlacesExplorerSection`** под каруселью (секция `#discover`), чтобы не ломать лендинг.
+- **`LoginButton`**: вариант **`on-catalog`** для светлой шапки каталога.
+
+**Why it changed:**
+- Нужна отдельная витрина всех мест по референсу, с поиском и переходом на существующую страницу места.
+
+**Files touched:**
+- `front/src/pages/PlacesCatalogPage.tsx` (новый)
+- `front/src/App.tsx`
+- `front/src/pages/LandingPage.tsx`
+- `front/src/features/places/placesApi.ts`
+- `front/src/components/LoginButton.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint`, `cd front && npm run build` — успешно.
+
+---
+
 ## [2026-03-21] - Hero h1 «Куда поедем?» в шрифте Gerhaus
 
 **Type:** feature / typography

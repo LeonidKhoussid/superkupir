@@ -4,7 +4,9 @@ import { useAuthStore } from './features/auth/authStore'
 import { QuizPage } from './features/quiz/QuizPage'
 import { LandingPage } from './pages/LandingPage'
 import { PlaceDetailPage } from './pages/PlaceDetailPage'
+import { PlacesCatalogPage } from './pages/PlacesCatalogPage'
 import { QuizDonePage } from './pages/QuizDonePage'
+import { RouteDetailPage } from './pages/RouteDetailPage'
 
 function AuthSessionBootstrap() {
   const hydrateSession = useAuthStore((state) => state.hydrateSession)
@@ -26,7 +28,9 @@ export default function App() {
       <AuthSessionBootstrap />
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/places" element={<PlacesCatalogPage />} />
         <Route path="/places/:id" element={<PlaceDetailPage />} />
+        <Route path="/routes/:id" element={<RouteDetailPage />} />
         <Route path="/quiz/:stepId" element={<QuizPage />} />
         <Route path="/quiz/done" element={<QuizDonePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

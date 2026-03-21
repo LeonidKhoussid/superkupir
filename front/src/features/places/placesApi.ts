@@ -22,11 +22,24 @@ export interface PublicPlace {
   logo_url: string | null
   size: string | null
   description: string | null
+  /** Доп. поля публичного контракта backend (toPublicPlace) — для сезонов и рекомендаций. */
+  short_description: string | null
   photo_urls: string[]
   lat: number | null
   lon: number | null
   coordinates_raw: string | null
   address: string | null
+  type_slug: string | null
+  season_slugs: string[]
+  estimated_cost: number | null
+  estimated_duration_minutes: number | null
+  radius_group: string | null
+  is_active: boolean
+}
+
+/** Ответ POST /places/recommendations: место + расстояние до якоря (км), если есть. */
+export interface PublicPlaceRecommendation extends PublicPlace {
+  distance_km: number | null
 }
 
 export interface PlacesListResponse {
@@ -38,11 +51,44 @@ export interface PlacesListResponse {
 
 /**
  * Первый элемент `photo_urls` — непустая строка после trim (как в контракте backend: массив URL).
+ * Та же логика, что у карточки каталога для выбора картинки.
+ */
+export function getPrimaryDisplayPhotoUrl(place: PublicPlace): string | null {
+  const raw = place.photo_urls[0]
+  if (typeof raw !== 'string') return null
+  const t = raw.trim()
+  return t.length > 0 ? t : null
+}
+
+/**
+ * Первый элемент `photo_urls` — непустая строка после trim (как в контракте backend: массив URL).
  * Пустой массив, пробелы или отсутствие первого URL считаются «без фото» для витрины.
  */
 export function placeHasDisplayablePhoto(place: PublicPlace): boolean {
-  const raw = place.photo_urls[0]
-  return typeof raw === 'string' && raw.trim().length > 0
+  return getPrimaryDisplayPhotoUrl(place) !== null
+}
+
+/**
+ * Порядок для каталога мест: уникальный primary URL → тот же URL у нескольких мест → без фото.
+ * Primary = `getPrimaryDisplayPhotoUrl` (первый непустой `photo_urls[0]` после trim).
+ * Внутри каждой группы сохраняется исходный порядок массива `places`.
+ */
+export function orderPlacesByCatalogImagePriority(places: PublicPlace[]): PublicPlace[] {
+  const counts = new Map<string, number>()
+  for (const p of places) {
+    const url = getPrimaryDisplayPhotoUrl(p)
+    if (url) counts.set(url, (counts.get(url) ?? 0) + 1)
+  }
+  const unique: PublicPlace[] = []
+  const duplicate: PublicPlace[] = []
+  const noImage: PublicPlace[] = []
+  for (const p of places) {
+    const url = getPrimaryDisplayPhotoUrl(p)
+    if (!url) noImage.push(p)
+    else if ((counts.get(url) ?? 0) === 1) unique.push(p)
+    else duplicate.push(p)
+  }
+  return [...unique, ...duplicate, ...noImage]
 }
 
 /**
@@ -75,6 +121,12 @@ export function getPlaceLatLon(place: PublicPlace): [number, number] | null {
 
 /** Размер страницы для бесконечной подгрузки (≤ 100 по контракту backend). */
 export const PLACES_PAGE_SIZE_EXPLORER = 25
+
+/** Максимальный `limit` для `GET /places` по контракту backend. */
+export const PLACES_LIST_MAX_LIMIT = 100
+
+/** Размер одной страницы `GET /places` при полной загрузке каталога `/places`. */
+export const PLACES_CATALOG_FETCH_LIMIT = 24
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000').replace(
   /\/$/,
@@ -124,16 +176,31 @@ const parseEnvelopeInt = (value: unknown): number | null => {
   return null
 }
 
+const parseOptionalFiniteNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+const parseSeasonSlugs = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+}
+
 export const parsePublicPlace = (value: unknown): PublicPlace | null => {
   if (!isRecord(value)) return null
 
   const id = parsePlaceId(value.id)
-  const external_id = value.external_id
   const name = value.name
 
   if (id === null) return null
-  if (typeof external_id !== 'string') return null
   if (typeof name !== 'string') return null
+
+  const rawEx = value.external_id
+  const external_id = typeof rawEx === 'string' ? rawEx : ''
 
   return {
     id,
@@ -144,13 +211,35 @@ export const parsePublicPlace = (value: unknown): PublicPlace | null => {
     logo_url: typeof value.logo_url === 'string' ? value.logo_url : null,
     size: typeof value.size === 'string' ? value.size : null,
     description: typeof value.description === 'string' ? value.description : null,
+    short_description:
+      typeof value.short_description === 'string' ? value.short_description : null,
     photo_urls: parseStringArray(value.photo_urls),
     lat: parseOptionalCoord(value.lat),
     lon: parseOptionalCoord(value.lon),
     coordinates_raw:
       typeof value.coordinates_raw === 'string' ? value.coordinates_raw : null,
     address: typeof value.address === 'string' ? value.address : null,
+    type_slug: typeof value.type_slug === 'string' ? value.type_slug : null,
+    season_slugs: parseSeasonSlugs(value.season_slugs),
+    estimated_cost: parseOptionalFiniteNumber(value.estimated_cost),
+    estimated_duration_minutes: parseOptionalFiniteNumber(value.estimated_duration_minutes),
+    radius_group: typeof value.radius_group === 'string' ? value.radius_group : null,
+    is_active: typeof value.is_active === 'boolean' ? value.is_active : true,
   }
+}
+
+export const parsePublicPlaceRecommendation = (value: unknown): PublicPlaceRecommendation | null => {
+  const base = parsePublicPlace(value)
+  if (!base) return null
+  const dk = isRecord(value) ? value.distance_km : undefined
+  let distance_km: number | null = null
+  if (typeof dk === 'number' && Number.isFinite(dk)) {
+    distance_km = dk
+  } else if (typeof dk === 'string' && dk.trim() !== '') {
+    const n = Number(dk)
+    if (Number.isFinite(n)) distance_km = n
+  }
+  return { ...base, distance_km }
 }
 
 const parsePlacesListResponse = (value: unknown): PlacesListResponse => {
@@ -214,6 +303,93 @@ const requestJson = async <T>(path: string, parse: (value: unknown) => T): Promi
   return parse(payload)
 }
 
+export type PlaceRecommendationsRequest = {
+  season_slug?: string
+  season_id?: number
+  anchor_place_id?: number
+  exclude_place_ids?: number[]
+  radius_km?: number
+  limit?: number
+}
+
+export interface PlaceRecommendationsResponse {
+  items: PublicPlaceRecommendation[]
+  total: number
+  limit: number
+}
+
+const parsePlaceRecommendationsResponse = (value: unknown): PlaceRecommendationsResponse => {
+  if (!isRecord(value)) {
+    throw new PlacesApiError('Сервис вернул некорректный ответ.')
+  }
+  const rawItems = value.items
+  if (!Array.isArray(rawItems)) {
+    throw new PlacesApiError('Сервис вернул некорректный ответ.')
+  }
+  const items: PublicPlaceRecommendation[] = []
+  for (const row of rawItems) {
+    const p = parsePublicPlaceRecommendation(row)
+    if (p) items.push(p)
+  }
+  const total = parseEnvelopeInt(value.total)
+  const limit = parseEnvelopeInt(value.limit)
+  if (total === null || limit === null) {
+    throw new PlacesApiError('Сервис вернул некорректный ответ.')
+  }
+  return { items, total, limit }
+}
+
+/**
+ * POST /places/recommendations — публичный эндпоинт; требуется `season_id` или `season_slug` (контракт backend).
+ */
+export async function fetchPlaceRecommendations(
+  input: PlaceRecommendationsRequest,
+  init?: { signal?: AbortSignal },
+): Promise<PlaceRecommendationsResponse> {
+  const body: Record<string, unknown> = {
+    exclude_place_ids: input.exclude_place_ids ?? [],
+    radius_km: input.radius_km ?? 75,
+    limit: input.limit ?? 40,
+  }
+  if (input.season_slug !== undefined) {
+    body.season_slug = input.season_slug
+  }
+  if (input.season_id !== undefined) {
+    body.season_id = input.season_id
+  }
+  if (input.anchor_place_id !== undefined) {
+    body.anchor_place_id = input.anchor_place_id
+  }
+
+  let response: Response
+  try {
+    response = await fetch(`${apiBaseUrl}/places/recommendations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: init?.signal,
+    })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw e
+    }
+    throw new PlacesApiError('Не удалось связаться с сервером. Проверьте подключение.')
+  }
+
+  if (!response.ok) {
+    throw new PlacesApiError(await extractErrorMessage(response), response.status)
+  }
+
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch {
+    throw new PlacesApiError('Сервис вернул некорректный ответ.')
+  }
+
+  return parsePlaceRecommendationsResponse(payload)
+}
+
 export type FetchPlacesParams = {
   /** 1..100 по контракту backend */
   limit?: number
@@ -230,6 +406,41 @@ export const fetchPlacesList = (params: FetchPlacesParams = {}) => {
   qs.set('limit', String(limit))
   qs.set('offset', String(offset))
   return requestJson(`/places?${qs.toString()}`, parsePlacesListResponse)
+}
+
+export type FetchAllPlacesOptions = {
+  /** Параметр `limit` для каждого запроса; по умолчанию `PLACES_LIST_MAX_LIMIT`. Не больше backend-максимума. */
+  pageLimit?: number
+}
+
+/**
+ * Последовательно запрашивает страницы `GET /places`, пока не собраны все записи по `total`
+ * (дедуп по `id` на случай пересечений). Каталог `/places` передаёт `pageLimit: PLACES_CATALOG_FETCH_LIMIT`.
+ */
+export async function fetchAllPlaces(options?: FetchAllPlacesOptions): Promise<PublicPlace[]> {
+  const requested = options?.pageLimit ?? PLACES_LIST_MAX_LIMIT
+  const limit = Math.min(PLACES_LIST_MAX_LIMIT, Math.max(1, Math.floor(requested)))
+  const byId = new Map<number, PublicPlace>()
+  let offset = 0
+  let total: number | null = null
+
+  for (let guard = 0; guard < 500; guard += 1) {
+    const res = await fetchPlacesList({ limit, offset })
+    total = res.total
+    for (const p of res.items) {
+      byId.set(p.id, p)
+    }
+    if (res.items.length === 0) break
+    if (byId.size >= res.total) break
+    offset += res.items.length
+    if (offset >= res.total) break
+  }
+
+  const list = Array.from(byId.values())
+  if (total !== null && list.length !== total) {
+    /* возможны пропуски id в выборке API — оставляем собранное */
+  }
+  return list
 }
 
 /**

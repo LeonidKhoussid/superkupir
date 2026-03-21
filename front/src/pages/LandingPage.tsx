@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom'
-import brandLogo from '../assets/brand-logo.svg'
 import { LandingHeroMedia } from '../components/LandingHeroMedia'
 import { LandingPlacesCarousel } from '../components/LandingPlacesCarousel'
-import { PlacesExplorerSection } from '../components/PlacesExplorerSection'
 import { LoginButton } from '../components/LoginButton'
+
+const HERO_LOGO_SRC = 'https://storage.yandexcloud.net/hackathon-ss/Group%201.svg'
 
 export function LandingPage() {
   return (
@@ -23,7 +23,7 @@ export function LandingPage() {
             aria-label="Край Тур — на главную"
           >
             <img
-              src={brandLogo}
+              src={HERO_LOGO_SRC}
               alt="Край Тур"
               width={174}
               height={81}
@@ -35,9 +35,9 @@ export function LandingPage() {
             className="hidden flex-1 justify-center gap-8 text-[14px] ml-32 font-semibold tracking-wide text-white/95 drop-shadow-sm md:flex lg:gap-14 lg:text-[20px]"
             aria-label="Основная навигация"
           >
-            <a href="#places" className="hover:opacity-90">
+            <Link to="/places" className="hover:opacity-90">
               Места
-            </a>
+            </Link>
             <a href="#cities" className="hover:opacity-90">
               Города
             </a>
@@ -70,8 +70,6 @@ export function LandingPage() {
       </section>
 
       <LandingPlacesCarousel />
-
-
 
       <section
         id="how"
