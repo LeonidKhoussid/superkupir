@@ -35,6 +35,7 @@ export function LoginButton({ variant = 'on-quiz', className = '' }: Props) {
         key={modalKey}
         open={open}
         onClose={() => setOpen(false)}
+        initialPanel={user ? 'account' : 'login'}
       />
     </>
   )

@@ -4,6 +4,142 @@
 
 ---
 
+## [2026-03-21 07:45] - Секция «Каталог на карте»: фиксированная высота, скролл списка, пропорции 32.5% / 5% / 62.5%
+
+**Type:** fix / UX
+
+**What changed:**
+- **`PlacesExplorerSection.tsx`:** split-блок на `lg+` получает **фиксированную высоту** (`clamp(22rem, 62vh, 46rem)`), обе колонки тянутся на всю высоту ряда (`grid` + `items-stretch`, `min-h-0` / `overflow-hidden` где нужно). Ширина ряда: **32.5%** список, **`gap-x-[5%]`**, **62.5%** карта (`grid-cols-[minmax(0,32.5%)_minmax(0,62.5%)]`). Список в **отдельной панели** с `overflow-y-auto`, на мобиле — `max-h-[min(56vh,520px)]`, на desktop высота панели от flex/grid. Подписи «Список мест» / «Карта» вынесены над панелями; корень скролла передаётся в список через `ref={setListScrollRoot}`.
+- **`PlacesExplorerList.tsx`:** **IntersectionObserver** для догрузки с **`root: scrollRoot`** (панель списка), а не viewport; без `scrollRoot` observer не вешается. `rootMargin` ~120px.
+- **`PlacesYandexMap.tsx`:** убран **`lg:sticky`** и фиксированные `lg:h-[520px]`; контейнер **`h-full` / `flex-1` / `min-h-0`** в колонке; на мобиле **`min-h-[min(42vh,360px)]`**. Добавлен **ResizeObserver** → `map.container?.fitToViewport?.()` после появления размеров. Fallback/error-блоки тоже заполняют высоту колонки.
+
+**Why it changed:**
+- Секция не должна раздуваться по высоте списка; карта и список — **равной высоты**; скролл только **внутри** левой панели; догрузка должна срабатывать при прокрутке **панели**, а не страницы.
+
+**Files touched:**
+- `front/src/components/PlacesExplorerSection.tsx`
+- `front/src/components/PlacesExplorerList.tsx`
+- `front/src/components/PlacesYandexMap.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21 06:30] - Секция «Каталог на карте»: список с подгрузкой + Yandex Map
+
+**Type:** feature
+
+**What changed:**
+- После карусели мест на лендинге добавлена секция **`#discover`** («Каталог на карте»): две колонки на `lg+` — слева список мест, справа карта; на меньших экранах блоки стекуются (список сверху, карта ниже).
+- **`placesApi.ts`:** `placeHasValidCoordinates`, `getPlaceLatLon` ([lat, lon] для Яндекса), константа **`PLACES_PAGE_SIZE_EXPLORER = 25`** для пагинации `GET /places` (в пределах backend `limit` 1–100).
+- **`PlacesExplorerSection.tsx`:** первая страница + догрузка по `offset`; дедуп по `id`; защита от параллельных дублирующих запросов и от повторной подгрузки после конца (`total`); состояния loading / error / empty / «Повторить» с инвалидацией устаревших ответов (`fetchGenRef`).
+- **`PlacesExplorerList.tsx`:** бесконечная подгрузка через **IntersectionObserver** (sentinel у низа списка, `rootMargin` ~280px); компактные строки (фото, имя, регион, метка «На карте» / «Без координат»); клик/Enter/Space выбирает место для карты; ссылка «Подробнее» → `/places/:id` с `stopPropagation`.
+- **`PlacesYandexMap.tsx`:** загрузка скрипта **Yandex Maps 2.1** с CDN (`apikey` + `lang=ru_RU`); отложенный старт по видимости колонки карты (**IntersectionObserver**); плейсмарки только для мест с валидными `lat`/`lon`; `setBounds` при нескольких точках, центрирование на **`selectedPlaceId`**; балун/хинт с названием; при отсутствии **`VITE_YANDEX_MAPS_API_KEY`**, ошибке загрузки SDK или инициализации — стабильный fallback (список работает).
+- **`vite-env.d.ts`:** опциональная типизация `VITE_YANDEX_MAPS_API_KEY`.
+- **`LandingPage.tsx`:** `<PlacesExplorerSection />` сразу после `<LandingPlacesCarousel />`.
+
+**Why it changed:**
+- Хакатон: обогащение лендинга интерактивным каталогом и картой без изменений backend, с упором на производительность (пагинация + ленивая инициализация карты).
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/src/components/PlacesExplorerSection.tsx`
+- `front/src/components/PlacesExplorerList.tsx`
+- `front/src/components/PlacesYandexMap.tsx`
+- `front/src/pages/LandingPage.tsx`
+- `front/src/vite-env.d.ts`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21 05:10] - Карусель мест: автопрокрутка и приоритет карточек с фото
+
+**Type:** feature
+
+**What changed:**
+- `placesApi.ts`: экспорт `placeHasDisplayablePhoto` и `prioritizePlacesWithPhotos` — сортировка по первому непустому URL в `photo_urls` (после trim), стабильный порядок внутри групп.
+- `LandingPlacesCarousel.tsx`: после успешной загрузки список пропускается через `prioritizePlacesWithPhotos`; добавлена автопрокрутка по таймеру (~5.2s), шаг = ширина карточки + CSS gap, в конце — плавный возврат к началу; пауза при наведении на десктопе; пауза ~10s после ручного скролла, колёсика, касания или кнопок навигации; при `prefers-reduced-motion: reduce` автопрокрутка отключена; уточнён подзаголовок секции и подпись на мобильных.
+
+**Why it changed:**
+- Витрина лендинга: визуально сильные карточки первыми и живое, но ненавязчивое движение карусели.
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/src/components/LandingPlacesCarousel.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21 05:05] - Bug fix: карусель мест не показывала карточки при строковом `id`
+
+**Type:** fix
+
+**What changed:**
+- В `placesApi.ts` ослаблен парсинг ответа `/places`: `id` места принимается и как **number**, и как **строка** (нормализация в целое ≥ 1), как при сериализации BIGINT / драйвера.
+- `total`, `limit`, `offset` в корне ответа также допускают строковые неотрицательные целые.
+- `lat` / `lon` дополнительно парсятся из строки в number для детальной страницы.
+
+**Why it changed:**
+- Реальный API отдавал `"id": "1"`; `parsePublicPlace` требовал только `number`, из-за чего все элементы отфильтровывались и `items` оказывался пустым при успешном HTTP.
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21 04:56] - Карусель мест с API GET /places под hero
+
+**Type:** feature
+
+**What changed:**
+- Добавлен `features/places/placesApi.ts`: `GET /places` с query `limit`/`offset` (витрина лендинга — `limit=12`, `offset=0`), парсинг ответа `{ items, total, limit, offset }` и сущности в **snake_case** (`photo_urls` как массив строк и т.д. по `memory_backend.md`); `GET /places/:id` по **внутреннему числовому id**; база URL как у auth (`VITE_API_BASE_URL` / `localhost:3000`).
+- Компонент `LandingPlacesCarousel`: секция `#places` сразу под hero-видео; горизонтальный скролл + `snap-x`/`snap-center`; карточки (имя, регион `source_location`/`address`, `size`, обрезанное `description`, первое фото из `photo_urls` с плейсхолдером и `onError`); состояния **loading** (скелеты с фиксированной min-height), **empty**, **error** с текстом и **«Повторить»** (без подмены данных моками); на `lg` — кнопки прокрутки.
+- Маршрут `GET /places/:id` на фронте: `PlaceDetailPage` по пути `/places/:id` (загрузка, 404, ошибка сети); карточки ведут на деталь.
+- `LandingPage`: вставлена карусель под hero; якорь `#places` перенесён на реальную секцию (удалён sr-only placeholder).
+- `App.tsx`: зарегистрирован маршрут `/places/:id`.
+
+**Why it changed:**
+- Хакатон: витрина мест с реальными данными backend и навигация на деталь по документированному контракту.
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/src/components/LandingPlacesCarousel.tsx`
+- `front/src/pages/PlaceDetailPage.tsx`
+- `front/src/pages/LandingPage.tsx`
+- `front/src/App.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21 04:51] - Кинематографичный hero с видео на лендинге
+
+**Type:** feature
+
+**What changed:**
+- Добавлен компонент `LandingHeroMedia`: полноэкранный фон hero с MP4 с Yandex Object Storage (`LANDING_HERO_VIDEO_SRC`), `autoplay` + `muted` + `loop` + `playsInline` + `object-cover`, `poster` и статичный fallback на `landing-hero.png` при ошибке загрузки или сбое `play()`.
+- При `prefers-reduced-motion: reduce` видео не показывается — только постер/изображение; оверлеи (тёмные и градиенты бренда) сохраняют читаемость текста и кликабельность CTA/`LoginButton`.
+- Секция hero: увеличенные `min-height` (`88dvh`–`92dvh`), тёмный базовый фон против CLS; обновлены eyebrow, заголовок и подзаголовок в travel-тоне; CTA «ПРОЙТИ КВИЗ» с `z-20` и тенью.
+- Удалён прежний split-image hero из `LandingPage` в пользу видео-фона.
+- **Bug fix:** в `LoginModal` убран `useEffect`, синхронно вызывавший `setPanel` при открытии (нарушение eslint `react-hooks/set-state-in-effect`); стартовая вкладка передаётся пропом `initialPanel` из `LoginButton` при смене `key`.
+
+**Why it changed:**
+- Требование вывести указанное промо-видео как главный above-the-fold визуал премиального travel-hero без поломки auth и вёрстки.
+
+**Files touched:**
+- `front/src/components/LandingHeroMedia.tsx`
+- `front/src/pages/LandingPage.tsx`
+- `front/src/components/LoginModal.tsx`
+- `front/src/components/LoginButton.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
 ## [2026-03-21 01:50] - Logout в auth-модалке
 
 **Type:** feature

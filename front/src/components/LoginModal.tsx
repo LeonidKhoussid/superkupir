@@ -2,12 +2,14 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuthStore } from '../features/auth/authStore'
 
+type Panel = 'login' | 'register' | 'account'
+
 type Props = {
   open: boolean
   onClose: () => void
+  /** Стартовая вкладка при монтировании (новый `key` из `LoginButton` при каждом открытии). */
+  initialPanel?: Panel
 }
-
-type Panel = 'login' | 'register' | 'account'
 type LoginFormState = {
   email: string
   password: string
@@ -26,13 +28,13 @@ const labelClassName = 'text-[14px] font-semibold text-neutral-900'
 const errorTextClassName = 'mt-4 rounded-2xl bg-red-50 px-4 py-3 text-[14px] font-medium text-red-700'
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-export function LoginModal({ open, onClose }: Props) {
+export function LoginModal({ open, onClose, initialPanel = 'login' }: Props) {
   const titleId = useId()
   const loginEmailRef = useRef<HTMLInputElement>(null)
   const registerNameRef = useRef<HTMLInputElement>(null)
   const accountButtonRef = useRef<HTMLButtonElement>(null)
   const user = useAuthStore((state) => state.user)
-  const [panel, setPanel] = useState<Panel>(user ? 'account' : 'login')
+  const [panel, setPanel] = useState<Panel>(initialPanel)
   const [loginForm, setLoginForm] = useState<LoginFormState>({
     email: '',
     password: '',
@@ -153,14 +155,6 @@ export function LoginModal({ open, onClose }: Props) {
       document.body.style.overflow = prevOverflow
     }
   }, [open, onClose, panel])
-
-  useEffect(() => {
-    if (!open) return
-
-    setPanel(user ? 'account' : 'login')
-    setLocalError(null)
-    clearError()
-  }, [open, user, clearError])
 
   if (!open) return null
 
