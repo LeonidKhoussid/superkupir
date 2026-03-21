@@ -7,6 +7,8 @@ interface AuthUserRow extends QueryResultRow {
   id: string;
   email: string;
   password_hash: string;
+  is_guide: boolean;
+  avatar_url: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -15,6 +17,8 @@ const mapAuthUser = (row: AuthUserRow): AuthUserRecord => ({
   id: row.id,
   email: row.email,
   passwordHash: row.password_hash,
+  isGuide: row.is_guide,
+  avatarUrl: row.avatar_url,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -23,7 +27,7 @@ export class AuthRepository {
   async findByEmail(email: string): Promise<AuthUserRecord | null> {
     const result = await pool.query<AuthUserRow>(
       `
-        SELECT id, email, password_hash, created_at, updated_at
+        SELECT id, email, password_hash, is_guide, avatar_url, created_at, updated_at
         FROM auth_users
         WHERE email = $1
       `,
@@ -36,7 +40,7 @@ export class AuthRepository {
   async findById(id: string): Promise<AuthUserRecord | null> {
     const result = await pool.query<AuthUserRow>(
       `
-        SELECT id, email, password_hash, created_at, updated_at
+        SELECT id, email, password_hash, is_guide, avatar_url, created_at, updated_at
         FROM auth_users
         WHERE id = $1
       `,
@@ -51,7 +55,7 @@ export class AuthRepository {
       `
         INSERT INTO auth_users (email, password_hash)
         VALUES ($1, $2)
-        RETURNING id, email, password_hash, created_at, updated_at
+        RETURNING id, email, password_hash, is_guide, avatar_url, created_at, updated_at
       `,
       [email, passwordHash],
     );

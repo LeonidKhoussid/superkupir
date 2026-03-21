@@ -48,7 +48,7 @@ export class PlaceInteractionsRepository {
       `
         SELECT EXISTS (
           SELECT 1
-          FROM wineries
+          FROM places
           WHERE id = $1
         ) AS exists
       `,

@@ -1,5 +1,11 @@
 import { AppError } from "../../lib/errors";
-import type { ListPlacesInput, PlacesListResult, PublicPlace } from "./places.types";
+import type {
+  ListPlacesInput,
+  PlaceRecommendationInput,
+  PlaceRecommendationsResult,
+  PlacesListResult,
+  PublicPlace,
+} from "./places.types";
 import { toPublicPlace } from "./places.types";
 import type { PlacesRepository } from "./places.repository";
 
@@ -25,5 +31,26 @@ export class PlacesService {
     }
 
     return toPublicPlace(place);
+  }
+
+  async recommendPlaces(input: PlaceRecommendationInput): Promise<PlaceRecommendationsResult> {
+    if (input.anchorPlaceId !== undefined) {
+      const exists = await this.placesRepository.placeExists(input.anchorPlaceId);
+
+      if (!exists) {
+        throw new AppError(404, "Anchor place not found");
+      }
+    }
+
+    const result = await this.placesRepository.findRecommendations(input);
+
+    return {
+      items: result.items.map((item) => ({
+        ...toPublicPlace(item),
+        distance_km: item.distanceKm,
+      })),
+      total: result.total,
+      limit: input.limit,
+    };
   }
 }
