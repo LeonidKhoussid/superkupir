@@ -522,15 +522,10 @@ export function LandingPlacesCarousel() {
             <div>
               <h2
                 id="places-heading"
-                className="font-display text-left text-[clamp(1.35rem,3vw,2rem)] font-bold uppercase tracking-[0.1em] text-[#4385f5]"
+                className="font-display text-left text-[20px] font-bold uppercase tracking-[0.1em] text-[#4385f5]"
               >
-                Откройте для себя
+                Популярные маршруты
               </h2>
-              <p className="mt-2 max-w-xl text-left text-[15px] leading-relaxed text-neutral-600 sm:text-[16px]">
-                Винодельни и локации Кубани — теперь это рекомендательная витрина:
-                сначала самые залайканные места, при равенстве выше поднимаются карточки
-                с фото.
-              </p>
               {interactionNotice ? (
                 <p
                   role={interactionNotice.kind === 'error' ? 'alert' : 'status'}

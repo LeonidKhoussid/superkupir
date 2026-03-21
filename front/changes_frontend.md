@@ -4,6 +4,67 @@
 
 ---
 
+## [2026-03-21] - Hero h1 «Куда поедем?» в шрифте Gerhaus
+
+**Type:** feature / typography
+
+**What changed:**
+- В `index.css` снова подключены `@font-face` для **Gerhaus** (Regular + Italic, `assets/fonts/Gerhaus-*.ttf`) и токен темы **`--font-gerhaus`** → утилита **`font-gerhaus`**.
+- В `LandingPage.tsx` у единственного hero **`h1`** («Куда поедем?») класс **`font-display`** заменён на **`font-gerhaus`**; остальной UI по-прежнему на AA Stetica.
+
+**Why it changed:**
+- Акцентный заголовок hero должен визуально отличаться и использовать Gerhaus.
+
+**Files touched:**
+- `front/src/index.css`
+- `front/src/pages/LandingPage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21] - Единый шрифт интерфейса: AA Stetica
+
+**Type:** feature / typography
+
+**What changed:**
+- В `src/index.css` удалены подключения **Gerhaus**; добавлены `@font-face` для **AA Stetica** (веса 300 / 400 / 500 / 700 / 900 и соответствующие italic из `assets/fonts/*.otf`).
+- В `@theme` заданы **`--font-sans`** и **`--font-display`** как `'AA Stetica', system-ui, sans-serif` — базовый текст и утилита `font-display` используют одно семейство.
+- `body` использует `font-family: var(--font-sans)`.
+- На `PlaceDetailPage` у блока координат убран `font-mono`, чтобы и он рендерился в AA Stetica.
+
+**Why it changed:**
+- Требование: весь текст приложения в AA Stetica с предсказуемыми начертаниями для `font-bold` и т.п.
+
+**Files touched:**
+- `front/src/index.css`
+- `front/src/pages/PlaceDetailPage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
+## [2026-03-21] - Лендинг: SVG-логотип, синий акцент в hero, синяя CTA «ПРОЙТИ КВИЗ»
+
+**Type:** feature / branding
+
+**What changed:**
+- Логотип в шапке лендинга и в компоненте `Logo` (квиз) заменён на растрово-векторный файл **`src/assets/brand-logo.svg`** (исходный ассет с CDN hackathon-ss); шапка лендинга: ссылка на `/` с `alt` «Край Тур», `object-contain`, ограничение высоты для мобилки и десктопа.
+- В hero подзаголовке акцент **«готовый маршрут»** переведён с `text-kr-lime` на **`text-kr-blue`**.
+- Кнопка **«ПРОЙТИ КВИЗ»**: фон **`bg-kr-blue`**, текст **белый**, hover **`brightness-110`**, focus ring без изменений по смыслу (белая обводка).
+
+**Why it changed:**
+- Обновление визуального бренда хакатона: единый логотип-изображение и согласованный синий акцент с CTA.
+
+**Files touched:**
+- `front/src/assets/brand-logo.svg`
+- `front/src/pages/LandingPage.tsx`
+- `front/src/components/Logo.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+---
+
 ## [2026-03-21 06:31] - Фикс unlike + рабочая comments modal в карусели мест
 
 **Type:** fix

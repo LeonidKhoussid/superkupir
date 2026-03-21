@@ -173,7 +173,7 @@ function PlaceDetailLoaded({ id }: { id: number }) {
           {place.lat != null && place.lon != null ? (
             <div>
               <dt className="font-semibold text-neutral-500">Координаты</dt>
-              <dd className="mt-1 font-mono text-[13px] text-neutral-800">
+              <dd className="mt-1 text-[13px] text-neutral-800">
                 {place.lat.toFixed(5)}, {place.lon.toFixed(5)}
               </dd>
             </div>
