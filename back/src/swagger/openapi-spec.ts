@@ -1,19 +1,56 @@
 import { env } from "../config/env";
 
-/** OpenAPI 3.0 document for Superkiper backend (kept in sync with routes manually). */
+const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
+
+const jsonContent = (schema: Record<string, unknown>) => ({
+  "application/json": {
+    schema,
+  },
+});
+
+const jsonResponse = (description: string, schema: Record<string, unknown>) => ({
+  description,
+  content: jsonContent(schema),
+});
+
+const idPathParameter = (name: string, description: string) => ({
+  name,
+  in: "path",
+  required: true,
+  description,
+  schema: { type: "integer", minimum: 1 },
+});
+
+const tokenPathParameter = {
+  name: "token",
+  in: "path",
+  required: true,
+  schema: { type: "string", minLength: 10, maxLength: 255 },
+};
+
 export const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "Superkiper API",
-    version: "0.1.0",
-    description: "HTTP API для веб-клиента Superkiper: аутентификация, места, лайки и комментарии.",
+    version: "0.2.0",
+    description:
+      "HTTP API for Superkiper backend: auth, place catalog, place interactions, route building, collaborative routes, and inspiration posts.",
   },
-  servers: [{ url: `http://localhost:${env.PORT}`, description: "Текущий процесс (PORT из .env)" }],
+  servers: [
+    {
+      url: `http://localhost:${env.PORT}`,
+      description: "Current local backend process",
+    },
+  ],
   tags: [
     { name: "Health" },
     { name: "Auth" },
+    { name: "Catalog" },
     { name: "Places" },
     { name: "Place interactions" },
+    { name: "Route build sessions" },
+    { name: "Routes" },
+    { name: "Posts" },
   ],
   components: {
     securitySchemes: {
@@ -21,10 +58,18 @@ export const openApiSpec = {
         type: "http",
         scheme: "bearer",
         bearerFormat: "JWT",
-        description: "Токен из POST /auth/login или POST /auth/register",
+        description: "Access token returned by POST /auth/login or POST /auth/register.",
       },
     },
     schemas: {
+      ErrorMessage: {
+        type: "object",
+        properties: {
+          error: { type: "string" },
+          details: {},
+        },
+        required: ["error"],
+      },
       ValidationError: {
         type: "object",
         properties: {
@@ -37,14 +82,25 @@ export const openApiSpec = {
                 path: { type: "string" },
                 message: { type: "string" },
               },
+              required: ["path", "message"],
             },
           },
         },
+        required: ["error", "details"],
+      },
+      HealthResponse: {
+        type: "object",
+        properties: {
+          status: { type: "string", example: "ok" },
+          service: { type: "string", example: "backend" },
+          timestamp: { type: "string", format: "date-time" },
+        },
+        required: ["status", "service", "timestamp"],
       },
       PublicAuthUser: {
         type: "object",
         properties: {
-          id: { type: "string" },
+          id: { type: "string", format: "uuid" },
           email: { type: "string", format: "email" },
         },
         required: ["id", "email"],
@@ -52,54 +108,123 @@ export const openApiSpec = {
       AuthResult: {
         type: "object",
         properties: {
-          user: { $ref: "#/components/schemas/PublicAuthUser" },
+          user: ref("PublicAuthUser"),
           token: { type: "string" },
         },
         required: ["user", "token"],
       },
       RegisterBody: {
         type: "object",
-        required: ["email", "password"],
         properties: {
           email: { type: "string", format: "email", maxLength: 320 },
           password: { type: "string", minLength: 8, maxLength: 72 },
         },
+        required: ["email", "password"],
       },
       MeResponse: {
         type: "object",
         properties: {
-          user: { $ref: "#/components/schemas/PublicAuthUser" },
+          user: ref("PublicAuthUser"),
         },
         required: ["user"],
+      },
+      CatalogItem: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          name: { type: "string" },
+          slug: { type: "string" },
+        },
+        required: ["id", "name", "slug"],
+      },
+      CatalogListResponse: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: ref("CatalogItem"),
+          },
+        },
+        required: ["items"],
       },
       PublicPlace: {
         type: "object",
         properties: {
           id: { type: "integer" },
-          external_id: { type: "string" },
+          external_id: { type: "string", nullable: true },
           name: { type: "string" },
           source_location: { type: "string", nullable: true },
           card_url: { type: "string", nullable: true },
           logo_url: { type: "string", nullable: true },
           size: { type: "string", nullable: true },
           description: { type: "string", nullable: true },
+          short_description: { type: "string", nullable: true },
           photo_urls: { type: "array", items: { type: "string" } },
           lat: { type: "number", nullable: true },
           lon: { type: "number", nullable: true },
           coordinates_raw: { type: "string", nullable: true },
           address: { type: "string", nullable: true },
+          type_slug: { type: "string", nullable: true },
+          season_slugs: { type: "array", items: { type: "string" } },
+          estimated_cost: { type: "number", nullable: true },
+          estimated_duration_minutes: { type: "integer", nullable: true },
+          radius_group: { type: "string", nullable: true },
+          is_active: { type: "boolean" },
         },
-        required: ["id", "external_id", "name", "photo_urls"],
+        required: ["id", "name", "photo_urls", "season_slugs", "is_active"],
       },
       PlacesListResult: {
         type: "object",
         properties: {
-          items: { type: "array", items: { $ref: "#/components/schemas/PublicPlace" } },
+          items: {
+            type: "array",
+            items: ref("PublicPlace"),
+          },
           total: { type: "integer" },
           limit: { type: "integer" },
           offset: { type: "integer" },
         },
         required: ["items", "total", "limit", "offset"],
+      },
+      PlaceRecommendation: {
+        allOf: [
+          ref("PublicPlace"),
+          {
+            type: "object",
+            properties: {
+              distance_km: { type: "number", nullable: true },
+            },
+            required: ["distance_km"],
+          },
+        ],
+      },
+      PlaceRecommendationsRequest: {
+        type: "object",
+        properties: {
+          season_id: { type: "integer", minimum: 1, nullable: true },
+          season_slug: { type: "string", minLength: 1, maxLength: 255, nullable: true },
+          anchor_place_id: { type: "integer", minimum: 1, nullable: true },
+          exclude_place_ids: {
+            type: "array",
+            items: { type: "integer", minimum: 1 },
+            default: [],
+          },
+          radius_km: { type: "number", minimum: 0.1, maximum: 500, default: 50 },
+          limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+        },
+        description: "At least one of season_id or season_slug is required.",
+      },
+      PlaceRecommendationsResult: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: ref("PlaceRecommendation"),
+          },
+          total: { type: "integer" },
+          limit: { type: "integer" },
+        },
+        required: ["items", "total", "limit"],
       },
       LikeSummary: {
         type: "object",
@@ -121,7 +246,7 @@ export const openApiSpec = {
       CommentAuthor: {
         type: "object",
         properties: {
-          id: { type: "string" },
+          id: { type: "string", format: "uuid" },
           email: { type: "string", format: "email" },
         },
         required: ["id", "email"],
@@ -131,7 +256,7 @@ export const openApiSpec = {
         properties: {
           id: { type: "integer" },
           place_id: { type: "integer" },
-          user: { $ref: "#/components/schemas/CommentAuthor" },
+          user: ref("CommentAuthor"),
           content: { type: "string" },
           created_at: { type: "string", format: "date-time" },
           updated_at: { type: "string", format: "date-time" },
@@ -141,7 +266,10 @@ export const openApiSpec = {
       PlaceCommentsListResult: {
         type: "object",
         properties: {
-          items: { type: "array", items: { $ref: "#/components/schemas/PublicPlaceComment" } },
+          items: {
+            type: "array",
+            items: ref("PublicPlaceComment"),
+          },
           total: { type: "integer" },
           limit: { type: "integer" },
           offset: { type: "integer" },
@@ -150,27 +278,400 @@ export const openApiSpec = {
       },
       CreateCommentBody: {
         type: "object",
-        required: ["content"],
         properties: {
           content: { type: "string", minLength: 1, maxLength: 1000 },
         },
+        required: ["content"],
       },
-      HealthResponse: {
+      RouteOwner: {
         type: "object",
         properties: {
-          status: { type: "string", example: "ok" },
-          service: { type: "string", example: "backend" },
-          timestamp: { type: "string", format: "date-time" },
+          id: { type: "string", format: "uuid" },
+          email: { type: "string", format: "email" },
+          is_guide: { type: "boolean" },
         },
-        required: ["status", "service", "timestamp"],
+        required: ["id", "email", "is_guide"],
       },
-      ErrorMessage: {
+      PublicRouteSummary: {
         type: "object",
         properties: {
-          error: { type: "string" },
-          details: {},
+          id: { type: "integer" },
+          owner: ref("RouteOwner"),
+          title: { type: "string" },
+          description: { type: "string", nullable: true },
+          creation_mode: {
+            type: "string",
+            enum: ["quiz", "selection_builder", "manual", "shared_copy"],
+          },
+          season_id: { type: "integer", nullable: true },
+          season_slug: { type: "string", nullable: true },
+          total_estimated_cost: { type: "number", nullable: true },
+          total_estimated_duration_minutes: { type: "integer", nullable: true },
+          revision_number: { type: "integer" },
+          access_type: {
+            type: "string",
+            enum: ["owner", "shared", "collaborator", "viewer"],
+          },
+          place_count: { type: "integer" },
+          created_at: { type: "string", format: "date-time" },
+          updated_at: { type: "string", format: "date-time" },
         },
-        required: ["error"],
+        required: [
+          "id",
+          "owner",
+          "title",
+          "description",
+          "creation_mode",
+          "season_id",
+          "season_slug",
+          "total_estimated_cost",
+          "total_estimated_duration_minutes",
+          "revision_number",
+          "access_type",
+          "place_count",
+          "created_at",
+          "updated_at",
+        ],
+      },
+      RoutePlaceInput: {
+        type: "object",
+        properties: {
+          place_id: { type: "integer", minimum: 1 },
+          sort_order: { type: "integer", minimum: 1 },
+          day_number: { type: "integer", minimum: 1, nullable: true },
+          estimated_travel_minutes_from_previous: {
+            type: "integer",
+            minimum: 1,
+            nullable: true,
+          },
+          estimated_distance_km_from_previous: {
+            type: "number",
+            minimum: 0.0001,
+            nullable: true,
+          },
+          stay_duration_minutes: { type: "integer", minimum: 1, nullable: true },
+        },
+        required: ["place_id", "sort_order"],
+      },
+      PublicRoutePlace: {
+        type: "object",
+        properties: {
+          route_place_id: { type: "integer" },
+          route_id: { type: "integer" },
+          place_id: { type: "integer" },
+          sort_order: { type: "integer" },
+          day_number: { type: "integer", nullable: true },
+          estimated_travel_minutes_from_previous: { type: "integer", nullable: true },
+          estimated_distance_km_from_previous: { type: "number", nullable: true },
+          stay_duration_minutes: { type: "integer", nullable: true },
+          created_at: { type: "string", format: "date-time" },
+          updated_at: { type: "string", format: "date-time" },
+          place: ref("PublicPlace"),
+        },
+        required: [
+          "route_place_id",
+          "route_id",
+          "place_id",
+          "sort_order",
+          "day_number",
+          "estimated_travel_minutes_from_previous",
+          "estimated_distance_km_from_previous",
+          "stay_duration_minutes",
+          "created_at",
+          "updated_at",
+          "place",
+        ],
+      },
+      PublicRouteDetail: {
+        allOf: [
+          ref("PublicRouteSummary"),
+          {
+            type: "object",
+            properties: {
+              places: {
+                type: "array",
+                items: ref("PublicRoutePlace"),
+              },
+            },
+            required: ["places"],
+          },
+        ],
+      },
+      RouteListResult: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: ref("PublicRouteSummary"),
+          },
+          limit: { type: "integer" },
+          offset: { type: "integer" },
+        },
+        required: ["items", "limit", "offset"],
+      },
+      PublicRouteShareLink: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          route_id: { type: "integer" },
+          token: { type: "string" },
+          can_edit: { type: "boolean" },
+          expires_at: { type: "string", format: "date-time", nullable: true },
+          created_at: { type: "string", format: "date-time" },
+        },
+        required: ["id", "route_id", "token", "can_edit", "expires_at", "created_at"],
+      },
+      SharedRouteDetail: {
+        allOf: [
+          ref("PublicRouteDetail"),
+          {
+            type: "object",
+            properties: {
+              can_edit: { type: "boolean" },
+            },
+            required: ["can_edit"],
+          },
+        ],
+      },
+      CreateRouteBody: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 200 },
+          description: { type: "string", minLength: 1, maxLength: 4000, nullable: true },
+          creation_mode: {
+            type: "string",
+            enum: ["quiz", "selection_builder", "manual", "shared_copy"],
+            default: "manual",
+          },
+          season_id: { type: "integer", minimum: 1, nullable: true },
+          total_estimated_cost: { type: "number", minimum: 0.0001, nullable: true },
+          total_estimated_duration_minutes: { type: "integer", minimum: 1, nullable: true },
+          place_ids: {
+            type: "array",
+            items: { type: "integer", minimum: 1 },
+            maxItems: 100,
+            default: [],
+          },
+        },
+        required: ["title"],
+      },
+      UpdateRouteBody: {
+        type: "object",
+        properties: {
+          revision_number: { type: "integer", minimum: 1 },
+          title: { type: "string", minLength: 1, maxLength: 200 },
+          description: { type: "string", minLength: 1, maxLength: 4000, nullable: true },
+          season_id: { type: "integer", minimum: 1, nullable: true },
+          total_estimated_cost: { type: "number", minimum: 0.0001, nullable: true },
+          total_estimated_duration_minutes: { type: "integer", minimum: 1, nullable: true },
+        },
+        required: ["revision_number"],
+      },
+      AddRoutePlaceBody: {
+        allOf: [
+          ref("RoutePlaceInput"),
+          {
+            type: "object",
+            properties: {
+              revision_number: { type: "integer", minimum: 1 },
+            },
+            required: ["revision_number"],
+          },
+        ],
+      },
+      UpdateRoutePlaceBody: {
+        type: "object",
+        properties: {
+          revision_number: { type: "integer", minimum: 1 },
+          sort_order: { type: "integer", minimum: 1 },
+          day_number: { type: "integer", minimum: 1, nullable: true },
+          estimated_travel_minutes_from_previous: { type: "integer", minimum: 1, nullable: true },
+          estimated_distance_km_from_previous: { type: "number", minimum: 0.0001, nullable: true },
+          stay_duration_minutes: { type: "integer", minimum: 1, nullable: true },
+        },
+        required: ["revision_number"],
+      },
+      CreateShareLinkBody: {
+        type: "object",
+        properties: {
+          can_edit: { type: "boolean", default: true },
+          expires_at: { type: "string", format: "date-time", nullable: true },
+        },
+      },
+      PatchSharedRouteBody: {
+        type: "object",
+        properties: {
+          revision_number: { type: "integer", minimum: 1 },
+          title: { type: "string", minLength: 1, maxLength: 200 },
+          description: { type: "string", minLength: 1, maxLength: 4000, nullable: true },
+          season_id: { type: "integer", minimum: 1, nullable: true },
+          total_estimated_cost: { type: "number", minimum: 0.0001, nullable: true },
+          total_estimated_duration_minutes: { type: "integer", minimum: 1, nullable: true },
+          places: {
+            type: "array",
+            maxItems: 100,
+            items: ref("RoutePlaceInput"),
+          },
+        },
+        required: ["revision_number"],
+      },
+      CreateRouteFromQuizBody: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 200 },
+          description: { type: "string", minLength: 1, maxLength: 4000, nullable: true },
+          season_id: { type: "integer", minimum: 1, nullable: true },
+          season_slug: { type: "string", minLength: 1, maxLength: 80 },
+          desired_place_count: { type: "integer", minimum: 1, maximum: 20, default: 5 },
+          quiz_answers: {
+            type: "object",
+            additionalProperties: true,
+          },
+          generated_place_ids: {
+            type: "array",
+            items: { type: "integer", minimum: 1 },
+            maxItems: 50,
+          },
+        },
+        required: ["quiz_answers"],
+      },
+      PublicRouteBuildSession: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          user_id: { type: "string", format: "uuid", nullable: true },
+          season_id: { type: "integer" },
+          season_slug: { type: "string" },
+          source_mode: { type: "string", enum: ["mobile_swipe", "desktop_board"] },
+          anchor_place_id: { type: "integer", nullable: true },
+          status: { type: "string", enum: ["active", "completed", "cancelled"] },
+          accepted_count: { type: "integer" },
+          rejected_count: { type: "integer" },
+          saved_count: { type: "integer" },
+          created_at: { type: "string", format: "date-time" },
+          updated_at: { type: "string", format: "date-time" },
+        },
+        required: [
+          "id",
+          "user_id",
+          "season_id",
+          "season_slug",
+          "source_mode",
+          "anchor_place_id",
+          "status",
+          "accepted_count",
+          "rejected_count",
+          "saved_count",
+          "created_at",
+          "updated_at",
+        ],
+      },
+      RouteBuildRecommendationsResult: {
+        type: "object",
+        properties: {
+          session: ref("PublicRouteBuildSession"),
+          recommendations: {
+            type: "object",
+            properties: {
+              items: { type: "array", items: ref("PlaceRecommendation") },
+              total: { type: "integer" },
+              limit: { type: "integer" },
+            },
+            required: ["items", "total", "limit"],
+          },
+        },
+        required: ["session", "recommendations"],
+      },
+      FinalizedRouteBuildResult: {
+        type: "object",
+        properties: {
+          session: ref("PublicRouteBuildSession"),
+          route: ref("PublicRouteDetail"),
+        },
+        required: ["session", "route"],
+      },
+      CreateRouteBuildSessionBody: {
+        type: "object",
+        properties: {
+          season_id: { type: "integer", minimum: 1 },
+          source_mode: { type: "string", enum: ["mobile_swipe", "desktop_board"] },
+          anchor_place_id: { type: "integer", minimum: 1, nullable: true },
+        },
+        required: ["season_id", "source_mode"],
+      },
+      RouteBuildActionBody: {
+        type: "object",
+        properties: {
+          place_id: { type: "integer", minimum: 1 },
+          action_type: { type: "string", enum: ["accepted", "rejected", "saved"] },
+        },
+        required: ["place_id", "action_type"],
+      },
+      FinalizeRouteBuildSessionBody: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 200 },
+          description: { type: "string", minLength: 1, maxLength: 4000, nullable: true },
+        },
+        required: ["title"],
+      },
+      PublicPostAuthor: {
+        type: "object",
+        properties: {
+          id: { type: "string", format: "uuid" },
+          email: { type: "string", format: "email" },
+          is_guide: { type: "boolean" },
+        },
+        required: ["id", "email", "is_guide"],
+      },
+      PublicPost: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          author: ref("PublicPostAuthor"),
+          title: { type: "string", nullable: true },
+          content: { type: "string" },
+          image_urls: { type: "array", items: { type: "string", format: "uri" } },
+          created_at: { type: "string", format: "date-time" },
+          updated_at: { type: "string", format: "date-time" },
+        },
+        required: ["id", "author", "title", "content", "image_urls", "created_at", "updated_at"],
+      },
+      PostsListResult: {
+        type: "object",
+        properties: {
+          items: { type: "array", items: ref("PublicPost") },
+          total: { type: "integer" },
+          limit: { type: "integer" },
+          offset: { type: "integer" },
+        },
+        required: ["items", "total", "limit", "offset"],
+      },
+      CreatePostBody: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 200, nullable: true },
+          content: { type: "string", minLength: 1, maxLength: 4000 },
+          image_urls: {
+            type: "array",
+            maxItems: 20,
+            items: { type: "string", format: "uri" },
+            default: [],
+          },
+        },
+        required: ["content"],
+      },
+      UpdatePostBody: {
+        type: "object",
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 200, nullable: true },
+          content: { type: "string", minLength: 1, maxLength: 4000 },
+          image_urls: {
+            type: "array",
+            maxItems: 20,
+            items: { type: "string", format: "uri" },
+          },
+        },
       },
     },
   },
@@ -178,80 +679,74 @@ export const openApiSpec = {
     "/health": {
       get: {
         tags: ["Health"],
-        summary: "Проверка живости сервиса",
+        summary: "Health check",
         responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/HealthResponse" } } },
-          },
+          "200": jsonResponse("Backend is healthy", ref("HealthResponse")),
         },
       },
     },
     "/auth/register": {
       post: {
         tags: ["Auth"],
-        summary: "Регистрация по email и паролю",
+        summary: "Register with email and password",
         requestBody: {
           required: true,
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/RegisterBody" } },
-          },
+          content: jsonContent(ref("RegisterBody")),
         },
         responses: {
-          "201": {
-            description: "Пользователь создан",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResult" } } },
-          },
-          "400": {
-            description: "Ошибка валидации",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ValidationError" } } },
-          },
+          "201": jsonResponse("Registered successfully", ref("AuthResult")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
         },
       },
     },
     "/auth/login": {
       post: {
         tags: ["Auth"],
-        summary: "Вход",
+        summary: "Login with email and password",
         requestBody: {
           required: true,
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/RegisterBody" } },
-          },
+          content: jsonContent(ref("RegisterBody")),
         },
         responses: {
-          "200": {
-            description: "Успешный вход",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/AuthResult" } } },
-          },
-          "400": {
-            description: "Ошибка валидации",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ValidationError" } } },
-          },
+          "200": jsonResponse("Logged in successfully", ref("AuthResult")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Invalid credentials", ref("ErrorMessage")),
         },
       },
     },
     "/auth/me": {
       get: {
         tags: ["Auth"],
-        summary: "Текущий пользователь",
+        summary: "Get current authenticated user",
         security: [{ bearerAuth: [] }],
         responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/MeResponse" } } },
-          },
-          "401": {
-            description: "Нет или невалидный токен",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorMessage" } } },
-          },
+          "200": jsonResponse("Current user", ref("MeResponse")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/place-types": {
+      get: {
+        tags: ["Catalog"],
+        summary: "List place types",
+        responses: {
+          "200": jsonResponse("Place types", ref("CatalogListResponse")),
+        },
+      },
+    },
+    "/seasons": {
+      get: {
+        tags: ["Catalog"],
+        summary: "List seasons",
+        responses: {
+          "200": jsonResponse("Seasons", ref("CatalogListResponse")),
         },
       },
     },
     "/places": {
       get: {
         tags: ["Places"],
-        summary: "Список мест",
+        summary: "List places",
         parameters: [
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } },
           { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
@@ -259,130 +754,462 @@ export const openApiSpec = {
           { name: "name", in: "query", schema: { type: "string", maxLength: 255 } },
           { name: "location", in: "query", schema: { type: "string", maxLength: 255 } },
           { name: "source_location", in: "query", schema: { type: "string", maxLength: 255 } },
+          { name: "type", in: "query", schema: { type: "string", maxLength: 255 } },
+          { name: "season", in: "query", schema: { type: "string", maxLength: 255 } },
+          { name: "is_active", in: "query", schema: { type: "boolean" } },
         ],
         responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/PlacesListResult" } } },
-          },
-          "400": {
-            description: "Ошибка валидации query",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ValidationError" } } },
-          },
+          "200": jsonResponse("Places list", ref("PlacesListResult")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+        },
+      },
+    },
+    "/places/recommendations": {
+      post: {
+        tags: ["Places"],
+        summary: "Get season-aware and radius-aware place recommendations",
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("PlaceRecommendationsRequest")),
+        },
+        responses: {
+          "200": jsonResponse("Recommendations", ref("PlaceRecommendationsResult")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "404": jsonResponse("Anchor place or season not found", ref("ErrorMessage")),
         },
       },
     },
     "/places/{id}": {
       get: {
         tags: ["Places"],
-        summary: "Карточка места",
-        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+        summary: "Get place by internal numeric id",
+        parameters: [idPathParameter("id", "Internal place id from places.id")],
         responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/PublicPlace" } } },
-          },
-          "400": {
-            description: "Некорректный id",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ValidationError" } } },
-          },
-          "404": {
-            description: "Место не найдено",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorMessage" } } },
-          },
+          "200": jsonResponse("Place detail", ref("PublicPlace")),
+          "404": jsonResponse("Place not found", ref("ErrorMessage")),
         },
       },
     },
     "/places/{id}/like": {
       post: {
         tags: ["Place interactions"],
-        summary: "Поставить лайк",
+        summary: "Like a place",
         security: [{ bearerAuth: [] }],
-        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+        parameters: [idPathParameter("id", "Internal place id from places.id")],
         responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/LikeMutationResult" } } },
-          },
-          "401": { description: "Не авторизован" },
-          "404": { description: "Место не найдено" },
+          "200": jsonResponse("Like applied", ref("LikeMutationResult")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Place not found", ref("ErrorMessage")),
         },
       },
       delete: {
         tags: ["Place interactions"],
-        summary: "Убрать лайк",
+        summary: "Remove current user's like from a place",
         security: [{ bearerAuth: [] }],
-        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+        parameters: [idPathParameter("id", "Internal place id from places.id")],
         responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/LikeMutationResult" } } },
-          },
-          "401": { description: "Не авторизован" },
-          "404": { description: "Место не найдено" },
+          "200": jsonResponse("Like removed", ref("LikeMutationResult")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Place not found", ref("ErrorMessage")),
         },
       },
     },
     "/places/{id}/likes": {
       get: {
         tags: ["Place interactions"],
-        summary: "Сводка по лайкам (Bearer опционален — для liked_by_current_user)",
-        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
-        security: [],
+        summary: "Get likes summary for a place",
+        security: [{ bearerAuth: [] }, {}],
+        parameters: [idPathParameter("id", "Internal place id from places.id")],
         responses: {
-          "200": {
-            description: "OK",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/LikeSummary" } } },
-          },
-          "404": { description: "Место не найдено" },
+          "200": jsonResponse("Likes summary", ref("LikeSummary")),
+          "404": jsonResponse("Place not found", ref("ErrorMessage")),
         },
       },
     },
     "/places/{id}/comments": {
       get: {
         tags: ["Place interactions"],
-        summary: "Комментарии к месту",
+        summary: "List comments for a place",
         parameters: [
-          { name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 } },
-          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+          idPathParameter("id", "Internal place id from places.id"),
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } },
           { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
         ],
         responses: {
-          "200": {
-            description: "OK",
-            content: {
-              "application/json": { schema: { $ref: "#/components/schemas/PlaceCommentsListResult" } },
-            },
-          },
-          "400": {
-            description: "Ошибка валидации",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ValidationError" } } },
-          },
-          "404": { description: "Место не найдено" },
+          "200": jsonResponse("Comments list", ref("PlaceCommentsListResult")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "404": jsonResponse("Place not found", ref("ErrorMessage")),
         },
       },
       post: {
         tags: ["Place interactions"],
-        summary: "Добавить комментарий",
+        summary: "Create a comment for a place",
         security: [{ bearerAuth: [] }],
-        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer", minimum: 1 } }],
+        parameters: [idPathParameter("id", "Internal place id from places.id")],
         requestBody: {
           required: true,
-          content: {
-            "application/json": { schema: { $ref: "#/components/schemas/CreateCommentBody" } },
-          },
+          content: jsonContent(ref("CreateCommentBody")),
         },
         responses: {
-          "201": {
-            description: "Создано",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/PublicPlaceComment" } } },
-          },
-          "400": {
-            description: "Ошибка валидации",
-            content: { "application/json": { schema: { $ref: "#/components/schemas/ValidationError" } } },
-          },
-          "401": { description: "Не авторизован" },
-          "404": { description: "Место не найдено" },
+          "201": jsonResponse("Comment created", ref("PublicPlaceComment")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Place not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/route-build-sessions": {
+      post: {
+        tags: ["Route build sessions"],
+        summary: "Start a route build session",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("CreateRouteBuildSessionBody")),
+        },
+        responses: {
+          "201": jsonResponse("Route build session created", ref("PublicRouteBuildSession")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Season or anchor place not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/route-build-sessions/{id}/actions": {
+      post: {
+        tags: ["Route build sessions"],
+        summary: "Append an accept/reject/save action to a route build session",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Route build session id")],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("RouteBuildActionBody")),
+        },
+        responses: {
+          "200": jsonResponse("Session updated", ref("PublicRouteBuildSession")),
+          "400": jsonResponse("Validation failed or session is not active", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Session or place not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/route-build-sessions/{id}/recommendations": {
+      get: {
+        tags: ["Route build sessions"],
+        summary: "Get next candidate places for a route build session",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          idPathParameter("id", "Route build session id"),
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 30 } },
+          { name: "radius_km", in: "query", schema: { type: "number", minimum: 0.1, maximum: 500 } },
+        ],
+        responses: {
+          "200": jsonResponse("Recommendations for session", ref("RouteBuildRecommendationsResult")),
+          "400": jsonResponse("Validation failed or session is not active", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Session not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/route-build-sessions/{id}/finalize": {
+      post: {
+        tags: ["Route build sessions"],
+        summary: "Finalize a route build session into a stored route",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Route build session id")],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("FinalizeRouteBuildSessionBody")),
+        },
+        responses: {
+          "200": jsonResponse("Session finalized", ref("FinalizedRouteBuildResult")),
+          "400": jsonResponse("Validation failed or no selected places", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Session not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes/from-quiz": {
+      post: {
+        tags: ["Routes"],
+        summary: "Create and store a route from quiz answers",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("CreateRouteFromQuizBody")),
+        },
+        responses: {
+          "201": jsonResponse("Route created from quiz", ref("PublicRouteDetail")),
+          "400": jsonResponse("Validation failed or route could not be built", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Season not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes": {
+      get: {
+        tags: ["Routes"],
+        summary: "List routes owned by or shared with the current user",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } },
+          { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
+        ],
+        responses: {
+          "200": jsonResponse("Routes list", ref("RouteListResult")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+        },
+      },
+      post: {
+        tags: ["Routes"],
+        summary: "Create a route manually or from selected places",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("CreateRouteBody")),
+        },
+        responses: {
+          "201": jsonResponse("Route created", ref("PublicRouteDetail")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Season or place not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes/shared/{token}": {
+      get: {
+        tags: ["Routes"],
+        summary: "Open a shared route by token",
+        parameters: [tokenPathParameter],
+        responses: {
+          "200": jsonResponse("Shared route", ref("SharedRouteDetail")),
+          "404": jsonResponse("Share link not found", ref("ErrorMessage")),
+        },
+      },
+      patch: {
+        tags: ["Routes"],
+        summary: "Edit a shared route through an editable share token",
+        parameters: [tokenPathParameter],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("PatchSharedRouteBody")),
+        },
+        responses: {
+          "200": jsonResponse("Shared route updated", ref("SharedRouteDetail")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "404": jsonResponse("Share link not found", ref("ErrorMessage")),
+          "409": jsonResponse("Route revision conflict", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes/shared/{token}/access": {
+      post: {
+        tags: ["Routes"],
+        summary: "Attach a shared route to the authenticated user's route list",
+        security: [{ bearerAuth: [] }],
+        parameters: [tokenPathParameter],
+        responses: {
+          "200": jsonResponse("Shared route attached", ref("PublicRouteDetail")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Share link not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes/{id}": {
+      get: {
+        tags: ["Routes"],
+        summary: "Get route detail",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Route id")],
+        responses: {
+          "200": jsonResponse("Route detail", ref("PublicRouteDetail")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "404": jsonResponse("Route not found", ref("ErrorMessage")),
+        },
+      },
+      patch: {
+        tags: ["Routes"],
+        summary: "Update route metadata with optimistic concurrency control",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Route id")],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("UpdateRouteBody")),
+        },
+        responses: {
+          "200": jsonResponse("Route updated", ref("PublicRouteDetail")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Route edit access is required", ref("ErrorMessage")),
+          "404": jsonResponse("Route not found", ref("ErrorMessage")),
+          "409": jsonResponse("Route revision conflict", ref("ErrorMessage")),
+        },
+      },
+      delete: {
+        tags: ["Routes"],
+        summary: "Delete a route",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          idPathParameter("id", "Route id"),
+          { name: "revision_number", in: "query", required: true, schema: { type: "integer", minimum: 1 } },
+        ],
+        responses: {
+          "204": { description: "Route deleted" },
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Only the owner can delete the route", ref("ErrorMessage")),
+          "404": jsonResponse("Route not found", ref("ErrorMessage")),
+          "409": jsonResponse("Route revision conflict", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes/{id}/places": {
+      post: {
+        tags: ["Routes"],
+        summary: "Add a place to a route",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Route id")],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("AddRoutePlaceBody")),
+        },
+        responses: {
+          "200": jsonResponse("Route updated", ref("PublicRouteDetail")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Route edit access is required", ref("ErrorMessage")),
+          "404": jsonResponse("Route or place not found", ref("ErrorMessage")),
+          "409": jsonResponse("Route revision conflict", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes/{id}/places/{routePlaceId}": {
+      patch: {
+        tags: ["Routes"],
+        summary: "Update a route place entry",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          idPathParameter("id", "Route id"),
+          idPathParameter("routePlaceId", "Route place id"),
+        ],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("UpdateRoutePlaceBody")),
+        },
+        responses: {
+          "200": jsonResponse("Route updated", ref("PublicRouteDetail")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Route edit access is required", ref("ErrorMessage")),
+          "404": jsonResponse("Route or route place not found", ref("ErrorMessage")),
+          "409": jsonResponse("Route revision conflict", ref("ErrorMessage")),
+        },
+      },
+      delete: {
+        tags: ["Routes"],
+        summary: "Delete a place from a route",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          idPathParameter("id", "Route id"),
+          idPathParameter("routePlaceId", "Route place id"),
+          { name: "revision_number", in: "query", required: true, schema: { type: "integer", minimum: 1 } },
+        ],
+        responses: {
+          "200": jsonResponse("Route updated", ref("PublicRouteDetail")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Route edit access is required", ref("ErrorMessage")),
+          "404": jsonResponse("Route or route place not found", ref("ErrorMessage")),
+          "409": jsonResponse("Route revision conflict", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/routes/{id}/share": {
+      post: {
+        tags: ["Routes"],
+        summary: "Create an editable or read-only share link for a route",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Route id")],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("CreateShareLinkBody")),
+        },
+        responses: {
+          "201": jsonResponse("Share link created", ref("PublicRouteShareLink")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Route share access requires edit permissions", ref("ErrorMessage")),
+          "404": jsonResponse("Route not found", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/posts": {
+      get: {
+        tags: ["Posts"],
+        summary: "List inspiration posts",
+        description:
+          "Use guide=true for guide posts, guide=false for regular user posts, or mine=true for the authenticated user's posts.",
+        parameters: [
+          { name: "guide", in: "query", schema: { type: "boolean" } },
+          { name: "mine", in: "query", schema: { type: "boolean" } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+          { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
+        ],
+        responses: {
+          "200": jsonResponse("Posts list", ref("PostsListResult")),
+          "401": jsonResponse("Authentication required for mine=true", ref("ErrorMessage")),
+        },
+      },
+      post: {
+        tags: ["Posts"],
+        summary: "Create a post",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("CreatePostBody")),
+        },
+        responses: {
+          "201": jsonResponse("Post created", ref("PublicPost")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+        },
+      },
+    },
+    "/posts/{id}": {
+      get: {
+        tags: ["Posts"],
+        summary: "Get post detail",
+        parameters: [idPathParameter("id", "Post id")],
+        responses: {
+          "200": jsonResponse("Post detail", ref("PublicPost")),
+          "404": jsonResponse("Post not found", ref("ErrorMessage")),
+        },
+      },
+      patch: {
+        tags: ["Posts"],
+        summary: "Update your own post",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Post id")],
+        requestBody: {
+          required: true,
+          content: jsonContent(ref("UpdatePostBody")),
+        },
+        responses: {
+          "200": jsonResponse("Post updated", ref("PublicPost")),
+          "400": jsonResponse("Validation failed", ref("ValidationError")),
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Only the post owner can edit this post", ref("ErrorMessage")),
+          "404": jsonResponse("Post not found", ref("ErrorMessage")),
+        },
+      },
+      delete: {
+        tags: ["Posts"],
+        summary: "Delete your own post",
+        security: [{ bearerAuth: [] }],
+        parameters: [idPathParameter("id", "Post id")],
+        responses: {
+          "204": { description: "Post deleted" },
+          "401": jsonResponse("Authentication required", ref("ErrorMessage")),
+          "403": jsonResponse("Only the post owner can delete this post", ref("ErrorMessage")),
+          "404": jsonResponse("Post not found", ref("ErrorMessage")),
         },
       },
     },

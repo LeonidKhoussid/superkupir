@@ -9,6 +9,8 @@ export interface AuthUserRecord {
   id: string;
   email: string;
   passwordHash: string;
+  isGuide: boolean;
+  avatarUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

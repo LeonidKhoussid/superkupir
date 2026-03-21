@@ -1,3 +1,74 @@
+[2026-03-21 21:29] - Redesign backend schema and route architecture for product flows
+
+Type: feature
+
+What changed:
+	•	Added the canonical product schema bootstrap in `back/sql/create_product_schema.sql`, extending `auth_users`, introducing normalized `place_types` / `seasons` / `places`, preserving place interactions in the canonical schema, and adding `routes`, `route_places`, `route_access`, `route_share_links`, `route_build_sessions`, `route_build_session_places`, and `posts`.
+	•	Added canonical CSV import flow in `back/src/scripts/import-places.ts` plus `npm run db:init:product` and `npm run db:import:places` to initialize and load the current dataset into `places`.
+	•	Reworked the backend places module to read from `places`, preserve the existing `/places` and `/places/:id` public contracts where practical, and add `POST /places/recommendations` for season-aware and radius-aware candidate fetching.
+	•	Added new backend modules for catalog taxonomy, collaborative routes, route-build sessions, and inspiration posts with the following route groups:
+	•	`GET /place-types`, `GET /seasons`
+	•	`POST /routes/from-quiz`, `GET /routes`, `POST /routes`, `GET /routes/:id`, `PATCH /routes/:id`, `DELETE /routes/:id`, `POST /routes/:id/places`, `PATCH /routes/:id/places/:routePlaceId`, `DELETE /routes/:id/places/:routePlaceId`, `POST /routes/:id/share`, `GET /routes/shared/:token`, `POST /routes/shared/:token/access`, `PATCH /routes/shared/:token`
+	•	`POST /route-build-sessions`, `POST /route-build-sessions/:id/actions`, `GET /route-build-sessions/:id/recommendations`, `POST /route-build-sessions/:id/finalize`
+	•	`GET /posts`, `GET /posts/:id`, `POST /posts`, `PATCH /posts/:id`, `DELETE /posts/:id`
+	•	Implemented optimistic concurrency for collaborative route editing through `routes.revision_number`, returning `409` on stale updates instead of silently overwriting newer edits.
+	•	Updated centralized CORS in `back/src/app.ts` to include `PATCH` alongside `GET`, `POST`, `DELETE`, and `OPTIONS`, because the new route and post editing endpoints are browser-facing.
+	•	Rebuilt Swagger/OpenAPI coverage in `back/src/swagger/openapi-spec.ts` and added the backend architecture reference doc `back/backend_db_structure.md`.
+	•	Verified `npm run check`, `npm run build`, `npm run db:init:product -- --dry-run`, `npm run db:import:places -- --dry-run`, built OpenAPI loading, app startup sanity via `createApp()`, and in-process CORS preflight support for `PATCH`.
+
+Why it changed:
+	•	The previous backend was centered on a raw winery import and could not support the updated product behavior around taxonomy, seasons, route generation flows, collaborative editing, share links, and inspiration posts.
+	•	The backend needed a canonical relational model and route map that could support the current frontend contracts while unlocking the new product flows without requiring frontend file changes in this task.
+
+Files touched:
+	•	back/package.json
+	•	back/sql/create_product_schema.sql
+	•	back/src/db/with-transaction.ts
+	•	back/src/scripts/import-places.ts
+	•	back/src/app.ts
+	•	back/src/swagger/openapi-spec.ts
+	•	back/src/modules/auth/auth.types.ts
+	•	back/src/modules/auth/auth.repository.ts
+	•	back/src/modules/catalog/catalog.types.ts
+	•	back/src/modules/catalog/catalog.repository.ts
+	•	back/src/modules/catalog/catalog.service.ts
+	•	back/src/modules/catalog/catalog.controller.ts
+	•	back/src/modules/catalog/catalog.routes.ts
+	•	back/src/modules/catalog/catalog.module.ts
+	•	back/src/modules/places/places.types.ts
+	•	back/src/modules/places/places.schemas.ts
+	•	back/src/modules/places/places.repository.ts
+	•	back/src/modules/places/places.service.ts
+	•	back/src/modules/places/places.controller.ts
+	•	back/src/modules/places/places.routes.ts
+	•	back/src/modules/place-interactions/place-interactions.repository.ts
+	•	back/src/modules/routes/routes.types.ts
+	•	back/src/modules/routes/routes.schemas.ts
+	•	back/src/modules/routes/routes.repository.ts
+	•	back/src/modules/routes/routes.service.ts
+	•	back/src/modules/routes/routes.controller.ts
+	•	back/src/modules/routes/routes.routes.ts
+	•	back/src/modules/routes/routes.module.ts
+	•	back/src/modules/route-build-sessions/route-build-sessions.types.ts
+	•	back/src/modules/route-build-sessions/route-build-sessions.schemas.ts
+	•	back/src/modules/route-build-sessions/route-build-sessions.repository.ts
+	•	back/src/modules/route-build-sessions/route-build-sessions.service.ts
+	•	back/src/modules/route-build-sessions/route-build-sessions.controller.ts
+	•	back/src/modules/route-build-sessions/route-build-sessions.routes.ts
+	•	back/src/modules/route-build-sessions/route-build-sessions.module.ts
+	•	back/src/modules/posts/posts.types.ts
+	•	back/src/modules/posts/posts.schemas.ts
+	•	back/src/modules/posts/posts.repository.ts
+	•	back/src/modules/posts/posts.service.ts
+	•	back/src/modules/posts/posts.controller.ts
+	•	back/src/modules/posts/posts.routes.ts
+	•	back/src/modules/posts/posts.module.ts
+	•	back/backend_db_structure.md
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+
+⸻
+
 [2026-03-21 06:31] - Fix browser CORS for unlike and confirm live comments frontend usage
 
 Type: fix
