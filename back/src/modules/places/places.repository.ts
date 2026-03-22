@@ -37,6 +37,15 @@ interface TotalRow extends QueryResultRow {
   total: number;
 }
 
+/** Фильтр квиза по городу: подстрока в `source_location` или `address` (без ILIKE-спецсимволов). */
+function pushQuizCityClause(values: unknown[], city: string | null | undefined): string {
+  const t = (city ?? "").trim();
+  if (t === "") return "";
+  values.push(t.toLowerCase());
+  const n = values.length;
+  return `AND (strpos(lower(COALESCE(places.source_location, '')), $${n}) > 0 OR strpos(lower(COALESCE(places.address, '')), $${n}) > 0)`;
+}
+
 interface PlaceExistsRow extends QueryResultRow {
   exists: boolean;
 }
@@ -660,6 +669,10 @@ export class PlacesRepository {
     const max = maxRaw >= min ? maxRaw : min;
     const prefs = [...new Set(input.typePreferenceOrder.filter((s) => typeof s === "string" && s.trim() !== ""))];
 
+    const values: unknown[] = [input.seasonSlug, min, max, prefs];
+    const citySql = pushQuizCityClause(values, input.city);
+    values.push(lim);
+
     const result = await pool.query<{ id: number }>(
       `
         SELECT places.id
@@ -677,12 +690,13 @@ export class PlacesRepository {
             places.estimated_cost IS NULL
             OR (places.estimated_cost >= $2 AND places.estimated_cost <= $3)
           )
+          ${citySql}
         ORDER BY
           COALESCE(array_position($4::text[], place_types.slug), 1000),
           places.id ASC
-        LIMIT $5
+        LIMIT $${values.length}
       `,
-      [input.seasonSlug, min, max, prefs, lim],
+      values,
     );
 
     return result.rows.map((row) => row.id);
@@ -721,6 +735,9 @@ export class PlacesRepository {
     const notHospitalitySql = `
       place_types.slug NOT IN ('hotel', 'guest_house', 'recreation_base', 'restaurant', 'gastro')`;
 
+    const dominantValues: unknown[] = [input.seasonSlug, min, max];
+    const dominantCitySql = pushQuizCityClause(dominantValues, input.city);
+
     const dominantResult = await pool.query<{ rg: string }>(
       `
         SELECT places.radius_group AS rg
@@ -730,24 +747,28 @@ export class PlacesRepository {
           AND ${seasonExistsSql}
           AND ${budgetSql}
           AND ${notHospitalitySql}
+          ${dominantCitySql}
           AND places.radius_group IS NOT NULL
           AND TRIM(places.radius_group) <> ''
         GROUP BY places.radius_group
         ORDER BY COUNT(*) DESC
         LIMIT 1
       `,
-      [input.seasonSlug, min, max],
+      dominantValues,
     );
 
     const clusterRg = dominantResult.rows[0]?.rg?.trim() ?? null;
 
     const runMain = async (radiusFilter: string | null): Promise<number[]> => {
-      const values: unknown[] = [input.seasonSlug, min, max, prefs, mainLim];
+      const values: unknown[] = [input.seasonSlug, min, max, prefs];
+      const mainCitySql = pushQuizCityClause(values, input.city);
       let rgClause = "";
       if (radiusFilter != null && radiusFilter !== "") {
         values.push(radiusFilter);
         rgClause = `AND places.radius_group = $${values.length}`;
       }
+      values.push(mainLim);
+      const limitIdx = values.length;
 
       const res = await pool.query<{ id: number }>(
         `
@@ -758,11 +779,12 @@ export class PlacesRepository {
             AND ${seasonExistsSql}
             AND ${budgetSql}
             AND ${notHospitalitySql}
+            ${mainCitySql}
             ${rgClause}
           ORDER BY
             COALESCE(array_position($4::text[], place_types.slug), 1000),
             places.id ASC
-          LIMIT $5
+          LIMIT $${limitIdx}
         `,
         values,
       );
@@ -787,6 +809,7 @@ export class PlacesRepository {
         return [];
       }
       const values: unknown[] = [...hospBudgetParams];
+      const hotelCitySql = pushQuizCityClause(values, input.city);
       let sql = `
         SELECT places.id
         FROM places
@@ -794,6 +817,7 @@ export class PlacesRepository {
         WHERE places.is_active = TRUE
           AND ${seasonExistsSql}
           AND ${hospBudgetSql}
+          ${hotelCitySql}
           AND place_types.slug IN ('hotel', 'guest_house', 'recreation_base')`;
       if (radiusFilter != null && radiusFilter !== "") {
         values.push(radiusFilter);
@@ -814,6 +838,7 @@ export class PlacesRepository {
         return [];
       }
       const values: unknown[] = [...hospBudgetParams];
+      const restCitySql = pushQuizCityClause(values, input.city);
       let sql = `
         SELECT places.id
         FROM places
@@ -821,6 +846,7 @@ export class PlacesRepository {
         WHERE places.is_active = TRUE
           AND ${seasonExistsSql}
           AND ${hospBudgetSql}
+          ${restCitySql}
           AND place_types.slug IN ('restaurant', 'gastro')`;
       if (radiusFilter != null && radiusFilter !== "") {
         values.push(radiusFilter);

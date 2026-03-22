@@ -99,6 +99,31 @@ function HeartIcon({ active }: { active: boolean }) {
   )
 }
 
+/** Стабильные «демо»-значения для карточки лендинга (км и рейтинг — вымышленные). */
+function carouselCardSyntheticKm(id: number): number {
+  const x = ((id * 2654435761) ^ (id << 13)) >>> 0
+  return 9 + (x % 32) // 9–40 км
+}
+
+function carouselCardSyntheticRating(id: number): string {
+  const x = ((id * 1597334677) ^ (id << 7)) >>> 0
+  const tenths = 2 + (x % 8) // 4,2–4,9
+  return `4,${tenths}`
+}
+
+function carouselCardDurationLabel(place: PublicPlace): string {
+  const min = place.estimated_duration_minutes
+  if (min != null && Number.isFinite(min) && min > 0) {
+    if (min < 60) return `${Math.round(min)} мин`
+    const h = min / 60
+    if (h % 1 === 0) return `${Math.round(h)} ч`
+    return `${h.toFixed(1).replace('.', ',')} ч`
+  }
+  const x = ((place.id * 2246822519) >>> 0) % 5
+  const labels = ['1,5 ч', '2 ч', '2,5 ч', '3 ч', '4 ч']
+  return labels[x] ?? '2 ч'
+}
+
 function CommentIcon() {
   return (
     <svg
@@ -136,6 +161,9 @@ function PlaceCard({
     place.address?.trim() ||
     'Краснодарский край'
   const desc = place.description?.trim()
+  const durationLabel = carouselCardDurationLabel(place)
+  const demoKm = carouselCardSyntheticKm(place.id)
+  const demoRating = carouselCardSyntheticRating(place.id)
 
   return (
     <article
@@ -152,6 +180,19 @@ function PlaceCard({
             {place.name}
           </h3>
           <p className="text-[13px] font-semibold text-[#4385f5]">{region}</p>
+          <p
+            className="text-[12px] leading-snug text-neutral-500"
+            aria-label={`Длительность ${durationLabel}, расстояние около ${demoKm} километров (условные данные), рейтинг ${demoRating.replace(',', '.')} из 5 (условный)`}
+          >
+            <span aria-hidden>🍷</span>{' '}
+            <span className="font-medium text-neutral-600">{durationLabel}</span>
+            <span aria-hidden> • </span>
+            <span aria-hidden>🚗</span>{' '}
+            <span className="font-medium text-neutral-600">{demoKm} км</span>
+            <span aria-hidden> • </span>
+            <span aria-hidden>⭐️</span>{' '}
+            <span className="font-medium text-neutral-600">{demoRating}</span>
+          </p>
           {place.size ? (
             <p className="text-[12px] font-medium uppercase tracking-wide text-neutral-400">
               {place.size}
@@ -524,7 +565,7 @@ export function LandingPlacesCarousel() {
                 id="places-heading"
                 className="font-display text-left text-[20px] font-bold uppercase tracking-[0.1em] text-[#4385f5]"
               >
-                Популярные маршруты
+                Необычные места
               </h2>
               {interactionNotice ? (
                 <p

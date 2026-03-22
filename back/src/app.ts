@@ -37,7 +37,9 @@ export const createApp = () => {
   app.get("/openapi.json", (_request, response) => {
     response.status(200).json(openApiSpec);
   });
-  app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
+  const swaggerUiHandlers = [swaggerUi.serve, swaggerUi.setup(openApiSpec)];
+  app.use("/api-docs", ...swaggerUiHandlers);
+  app.use("/docs", ...swaggerUiHandlers);
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
   app.use("/", catalogRouter);

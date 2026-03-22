@@ -91,7 +91,7 @@ SPA «Край Тур»: лендинг с hero, квиз из пяти шаго
 
 ## State management
 
-- **Квиз:** Zustand (`useQuizStore`); конфиг **`src/data/quizSteps.ts`** (**`kind`**: `count` | `season` | `budget` | `radio`); **`QuizNextButton`** с **`disabled`**; итог — **`/quiz/done`** и **`createRouteFromQuiz`**.
+- **Квиз:** Zustand (`useQuizStore`, поле **`city`**); конфиг **`src/data/quizSteps.ts`** (**`kind`**: `count` | **`city`** | `season` | `budget` | `radio`); **`QuizNextButton`** с **`disabled`**; итог — **`/quiz/done`** и **`createRouteFromQuiz`** (**`POST /routes/from-quiz`** включает **`city`** в JSON).
 - **Auth:** Zustand (`useAuthStore`) — `user`, `token`, `status`, `error`; хранение в `localStorage` под ключом `kray-tour-auth`.
 - **`/myroutes`:** локальный state — `routes`, `phase`, `errorMessage`, `mobileNavOpen`; при JWT — **`fetchAllUserRoutes(..., { scope: 'accessible' })`**; guest CTA — **`requestAuthModalOpen`**.
 - **Конструктор маршрута (каталог):** Zustand **`useRouteCartStore`** (`features/routeCart/routeCartStore.ts`), persist в **`sessionStorage`**; сезон для API: приоритет **`season_slugs[0]`** у якорного/добавленного места, иначе первый slug из **`GET /seasons`**; **`activeSeasonId`** выставляется на `/places` при наличии списка сезонов; смена якоря по чипу — **`setRouteAnchor`**. Создание маршрута только при наличии JWT (**`POST /routes`**), иначе открывается существующая auth-модалка через **`requestAuthModalOpen`**. Мобильные пропуски свайпом накапливаются в **`swipeRejectedIds`** и уменьшают повторный показ карточек в рекомендациях и колоде.

@@ -529,7 +529,7 @@ export const openApiSpec = {
       CreateRouteFromQuizBody: {
         type: "object",
         description:
-          "Создание маршрута из квиза. Основной контракт: people_count, season, budget_from, budget_to, excursion_type, days_count. Legacy: quiz_answers (и опционально season_slug / desired_place_count).",
+          "Создание маршрута из квиза. Основной контракт: people_count, season, budget_from, budget_to, excursion_type, days_count, city (город/регион для каталога и внешнего ML). Legacy: quiz_answers (и опционально season_slug / desired_place_count).",
         properties: {
           people_count: { type: "integer", minimum: 1, maximum: 50 },
           season: {
@@ -547,6 +547,12 @@ export const openApiSpec = {
             description: "активный | умеренный | спокойный (регистр не важен)",
           },
           days_count: { type: "integer", minimum: 1, maximum: 30 },
+          city: {
+            type: "string",
+            minLength: 1,
+            maxLength: 120,
+            description: "Город или регион (подбор каталога + payload для ML).",
+          },
           title: { type: "string", minLength: 1, maxLength: 200 },
           description: { type: "string", minLength: 1, maxLength: 4000, nullable: true },
           season_id: { type: "integer", minimum: 1, nullable: true },

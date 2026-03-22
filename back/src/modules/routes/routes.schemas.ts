@@ -146,6 +146,8 @@ export const createRouteFromQuizSchema = z
     budget_to: z.coerce.number().min(0).max(50_000_000).optional(),
     excursion_type: z.string().trim().min(1).max(40).optional(),
     days_count: z.coerce.number().int().min(1).max(30).optional(),
+    /** Город / регион для подбора мест и передачи во внешний ML-контракт. */
+    city: z.string().trim().min(1).max(120).optional(),
     title: trimmedString.max(200).optional(),
     description: nullableTrimmedString,
     season_id: nullableInt,

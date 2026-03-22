@@ -6,7 +6,6 @@ import {
   RouteYandexMap,
   type RouteMapMetrics,
 } from "../components/RouteYandexMap";
-import brandLogo from "../assets/brand-logo.svg";
 import { useAuthStore } from "../features/auth/authStore";
 import {
   getPrimaryDisplayPhotoUrl,
@@ -37,6 +36,9 @@ import { useQuizStore } from "../features/quiz/quizStore";
 const yandexKey = import.meta.env.VITE_YANDEX_MAPS_API_KEY as
   | string
   | undefined;
+
+const ROUTE_PAGE_NAV_LOGO_SRC =
+  "https://storage.yandexcloud.net/hackathon-ss/logoPlace.svg";
 
 function typeSlugLabel(slug: string | null): string {
   if (!slug) return "";
@@ -754,7 +756,7 @@ function RouteReviewLoaded({ id }: { id: number }) {
               className="flex shrink-0 items-center gap-2"
               aria-label="Край Тур — на главную">
               <img
-                src={brandLogo}
+                src={ROUTE_PAGE_NAV_LOGO_SRC}
                 alt=""
                 className="h-8 w-auto object-contain sm:h-9"
               />

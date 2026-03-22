@@ -171,18 +171,16 @@ export function LandingPage() {
           className="relative z-10 mx-auto mt-12 flex max-w-[1440px] flex-col items-center px-5 text-center sm:mt-16 lg:mt-[min(8vh,5rem)]"
         >
           <h1 className="font-gerhaus max-w-[920px] text-[clamp(2rem,6vw,4rem)] font-medium uppercase leading-[1.05] tracking-[0.05em] drop-shadow-[0_4px_28px_rgba(0,0,0,0.55)]">
-            Куда поедем?
+          Надоело искать самому? 
           </h1>
           <p className="mt-6 max-w-[640px] text-[15px] font-medium leading-relaxed text-white/95 drop-shadow-sm sm:text-[27px] lg:text-[28px]">
-            Подберём{' '}
-            <span className="font-bold text-kr-blue">готовый маршрут</span> по
-            Краснодарскому краю за пару секунд
+          Соберем идеальный маршрут для вас за 1 минуту
           </p>
           <Link
             to="/quiz/1"
             className="font-display relative z-20 mt-10 inline-flex min-h-[52px] min-w-[240px] items-center justify-center rounded-full bg-kr-blue px-12 text-[15px] font-bold uppercase tracking-[0.18em] text-white shadow-lg shadow-black/25 hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white sm:mt-12 sm:min-w-[280px] sm:px-14 sm:text-[16px]"
           >
-            ПРОЙТИ КВИЗ
+            построить маршрут
           </Link>
         </div>
       </section>

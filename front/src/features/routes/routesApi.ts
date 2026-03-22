@@ -424,7 +424,7 @@ export async function fetchAllUserRoutes(
   return items
 }
 
-/** Тело `POST /routes/from-quiz` (продуктовый квиз, rule-based на бэкенде). */
+/** Тело `POST /routes/from-quiz` (продуктовый квиз, rule-based на бэкенде; `city` — для ML и фильтра каталога). */
 export type CreateRouteFromQuizInput = {
   people_count: number
   season: string
@@ -432,6 +432,7 @@ export type CreateRouteFromQuizInput = {
   budget_to: number
   excursion_type: string
   days_count: number
+  city: string
   title?: string
   description?: string | null
 }
@@ -449,6 +450,7 @@ export async function createRouteFromQuiz(
       budget_to: input.budget_to,
       excursion_type: input.excursion_type,
       days_count: input.days_count,
+      city: input.city.trim(),
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.description !== undefined ? { description: input.description } : {}),
     },

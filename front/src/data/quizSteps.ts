@@ -47,6 +47,12 @@ export type QuizStepConfig =
       kind: 'radio'
       options: readonly string[]
     })
+  | (StepCommon & {
+      kind: 'city'
+      minLength: number
+      maxLength: number
+      placeholder: string
+    })
 
 export const SEASON_OPTIONS: readonly { slug: SeasonSlug; label: string }[] = [
   { slug: 'spring', label: 'весна' },
@@ -72,6 +78,18 @@ export const quizSteps: QuizStepConfig[] = [
   },
   {
     id: 2,
+    kind: 'city',
+    ...quizIllustrationBlock,
+    helper: 'давай подберем тебе маршрут!',
+    helperPlacement: 'center',
+    logoMode: 'stack',
+    titleLines: [{ text: 'Город или регион?', tone: 'white' }],
+    minLength: 2,
+    maxLength: 120,
+    placeholder: 'Например, Краснодар',
+  },
+  {
+    id: 3,
     kind: 'season',
     ...quizIllustrationBlock,
     helper: 'давай подберем тебе маршрут!',
@@ -81,7 +99,7 @@ export const quizSteps: QuizStepConfig[] = [
     options: SEASON_OPTIONS,
   },
   {
-    id: 3,
+    id: 4,
     kind: 'budget',
     ...quizIllustrationBlock,
     logoMode: 'stack',
@@ -91,7 +109,7 @@ export const quizSteps: QuizStepConfig[] = [
     step: 1000,
   },
   {
-    id: 4,
+    id: 5,
     kind: 'radio',
     ...quizIllustrationBlock,
     helper: 'давай подберем тебе маршрут!',
@@ -101,7 +119,7 @@ export const quizSteps: QuizStepConfig[] = [
     options: [...REST_TYPE_OPTIONS],
   },
   {
-    id: 5,
+    id: 6,
     kind: 'count',
     ...quizIllustrationBlock,
     logoMode: 'stack',

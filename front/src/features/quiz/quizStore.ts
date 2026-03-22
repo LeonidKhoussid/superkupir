@@ -9,6 +9,8 @@ export type QuizRestType = 'Активный' | 'Умеренный' | 'Спок
 
 export type QuizState = {
   peopleCount: number | null
+  /** Город или регион для `POST /routes/from-quiz` (ML / фильтр каталога на бэке). */
+  city: string | null
   /** Один выбранный сезон (карта / квиз). */
   season: SeasonSlug | null
   budget: QuizBudget
@@ -16,6 +18,7 @@ export type QuizState = {
   daysCount: number | null
 
   setPeopleCount: (value: number | null) => void
+  setCity: (value: string | null) => void
   setSeason: (slug: SeasonSlug | null) => void
   setBudgetFrom: (value: number) => void
   setBudgetTo: (value: number) => void
@@ -32,12 +35,15 @@ function clamp(n: number, min: number, max: number) {
 
 export const useQuizStore = create<QuizState>((set) => ({
   peopleCount: null,
+  city: null,
   season: null,
   budget: { ...BUDGET_INITIAL },
   restType: null,
   daysCount: null,
 
   setPeopleCount: (value) => set({ peopleCount: value }),
+
+  setCity: (value) => set({ city: value }),
 
   setSeason: (slug) => set({ season: slug }),
 
@@ -66,6 +72,7 @@ export const useQuizStore = create<QuizState>((set) => ({
   reset: () =>
     set({
       peopleCount: null,
+      city: null,
       season: null,
       budget: { ...BUDGET_INITIAL },
       restType: null,

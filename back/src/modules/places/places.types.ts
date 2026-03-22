@@ -27,6 +27,8 @@ export interface QuizPlacesBuildInput {
   perPersonBudgetMax: number;
   typePreferenceOrder: string[];
   limit: number;
+  /** Подстрока города/региона: совпадение в `source_location` или `address` (для квиза / ML). */
+  city?: string | null;
 }
 
 /** Квиз: основные точки в одном `radius_group` + отель и еда там же. */
@@ -39,6 +41,8 @@ export interface QuizClusteredBuildInput {
   mainLimit: number;
   maxHotels: number;
   maxRestaurants: number;
+  /** Подстрока города/региона для фильтра каталога (то же поле, что уходит в контракт квиза / ML). */
+  city?: string | null;
 }
 
 export interface QuizClusteredBuildResult {

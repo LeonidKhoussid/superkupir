@@ -15,12 +15,12 @@ import {
   RoutesApiError,
 } from '../features/routes/routesApi'
 
-const MIN_LOADING_MS = 6600
+const MIN_LOADING_MS = 6000
 
 const STATUS_MESSAGES = [
-  'Подбираем маршрут под ваши предпочтения…',
-  'Анализируем сезон, бюджет и формат поездки…',
-  'Собираем оптимальные точки маршрута…',
+  'Запрашиваем рекомендации и выстраиваем порядок точек на карте…',
+  'Проверяем маршрут без лишних «туда-сюда»…',
+  'Почти готово — сохраняем маршрут…',
 ] as const
 
 export function QuizDonePage() {
@@ -28,6 +28,7 @@ export function QuizDonePage() {
   const token = useAuthStore((s) => s.token)
 
   const peopleCount = useQuizStore((s) => s.peopleCount)
+  const city = useQuizStore((s) => s.city)
   const season = useQuizStore((s) => s.season)
   const budget = useQuizStore((s) => s.budget)
   const restType = useQuizStore((s) => s.restType)
@@ -50,8 +51,11 @@ export function QuizDonePage() {
 
   const seasonText = season != null ? formatSeasonLabel(season) : '—'
 
+  const cityTrimmed = (city ?? '').trim()
   const answersComplete =
     peopleCount != null &&
+    cityTrimmed.length >= 2 &&
+    cityTrimmed.length <= 120 &&
     season != null &&
     restType != null &&
     daysCount != null &&
@@ -80,6 +84,7 @@ export function QuizDonePage() {
           budget_to: budget.to,
           excursion_type: restType!.toLowerCase(),
           days_count: daysCount!,
+          city: cityTrimmed,
         }),
         new Promise<undefined>((resolve) => {
           window.setTimeout(resolve, MIN_LOADING_MS)
@@ -99,6 +104,7 @@ export function QuizDonePage() {
     answersComplete,
     budget.from,
     budget.to,
+    cityTrimmed,
     daysCount,
     navigate,
     peopleCount,
@@ -185,6 +191,10 @@ export function QuizDonePage() {
           <li>
             <span className="font-semibold text-kr-lime">Сколько человек:</span>{' '}
             {peopleCount ?? '—'}
+          </li>
+          <li>
+            <span className="font-semibold text-kr-lime">Город / регион:</span>{' '}
+            {cityTrimmed || '—'}
           </li>
           <li>
             <span className="font-semibold text-kr-lime">Сезон:</span> {seasonText}

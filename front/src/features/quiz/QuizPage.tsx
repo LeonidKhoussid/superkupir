@@ -11,6 +11,7 @@ import { useQuizStore } from './quizStore'
 
 type AnswerSlice = {
   peopleCount: number | null
+  city: string | null
   season: SeasonSlug | null
   budget: QuizBudget
   restType: QuizRestType | null
@@ -22,6 +23,10 @@ function stepIsValid(step: QuizStepConfig, s: AnswerSlice): boolean {
     case 'count': {
       const v = step.answerKey === 'peopleCount' ? s.peopleCount : s.daysCount
       return v != null && Number.isFinite(v) && v >= step.min && v <= step.max
+    }
+    case 'city': {
+      const t = (s.city ?? '').trim()
+      return t.length >= step.minLength && t.length <= step.maxLength
     }
     case 'season':
       return s.season != null
@@ -42,12 +47,14 @@ export function QuizPage() {
   const step = useMemo(() => (Number.isFinite(id) ? getStepById(id) : undefined), [id])
 
   const peopleCount = useQuizStore((st) => st.peopleCount)
+  const city = useQuizStore((st) => st.city)
   const season = useQuizStore((st) => st.season)
   const budget = useQuizStore((st) => st.budget)
   const restType = useQuizStore((st) => st.restType)
   const daysCount = useQuizStore((st) => st.daysCount)
 
   const setPeopleCount = useQuizStore((st) => st.setPeopleCount)
+  const setCity = useQuizStore((st) => st.setCity)
   const setSeason = useQuizStore((st) => st.setSeason)
   const setBudgetFrom = useQuizStore((st) => st.setBudgetFrom)
   const setBudgetTo = useQuizStore((st) => st.setBudgetTo)
@@ -56,7 +63,7 @@ export function QuizPage() {
 
   const canProceed =
     step != null &&
-    stepIsValid(step, { peopleCount, season, budget, restType, daysCount })
+    stepIsValid(step, { peopleCount, city, season, budget, restType, daysCount })
 
   if (!step || id < 1 || id > quizSteps.length) {
     return (
@@ -152,11 +159,13 @@ export function QuizPage() {
 
           <div className="mt-8 sm:mt-10">{renderStepControls(step, {
             peopleCount,
+            city,
             season,
             budget,
             restType,
             daysCount,
             setPeopleCount,
+            setCity,
             setSeason,
             setBudgetFrom,
             setBudgetTo,
@@ -206,11 +215,13 @@ export function QuizPage() {
 
 type ControlsProps = {
   peopleCount: number | null
+  city: string | null
   season: SeasonSlug | null
   budget: { from: number; to: number }
   restType: QuizRestType | null
   daysCount: number | null
   setPeopleCount: (v: number | null) => void
+  setCity: (v: string | null) => void
   setSeason: (s: SeasonSlug | null) => void
   setBudgetFrom: (v: number) => void
   setBudgetTo: (v: number) => void
@@ -255,6 +266,30 @@ function renderStepControls(step: QuizStepConfig, p: ControlsProps) {
         </div>
       )
     }
+    case 'city':
+      return (
+        <div className="flex max-w-[520px] flex-col gap-3">
+          <label htmlFor={`quiz-city-${step.id}`} className="sr-only">
+            Город или регион поездки
+          </label>
+          <input
+            id={`quiz-city-${step.id}`}
+            type="text"
+            autoComplete="address-level2"
+            maxLength={step.maxLength}
+            placeholder={step.placeholder}
+            value={p.city ?? ''}
+            onChange={(e) => {
+              const v = e.target.value
+              p.setCity(v === '' ? null : v)
+            }}
+            className={inputClass}
+          />
+          <p className="text-[13px] text-white/80">
+            От {step.minLength} до {step.maxLength} символов — так уходит в подбор маршрута
+          </p>
+        </div>
+      )
     case 'season':
       return (
         <ul

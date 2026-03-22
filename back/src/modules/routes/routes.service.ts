@@ -1,3 +1,4 @@
+import { env } from "../../config/env";
 import { AppError } from "../../lib/errors";
 import type { CatalogRepository } from "../catalog/catalog.repository";
 import type { PlacesRepository } from "../places/places.repository";
@@ -14,6 +15,7 @@ import {
   toPublicRouteShareLink,
   toPublicRouteSummary,
 } from "./routes.types";
+import { fetchMlQuizPlaceIds } from "./mlQuizRoute.client";
 import type { RoutesRepository } from "./routes.repository";
 
 const isEditableAccess = (accessType: RouteAccessType) =>
@@ -462,9 +464,69 @@ export class RoutesService {
     const daysCount = body.days_count!;
     const seasonRaw = body.season!;
     const excursionRaw = body.excursion_type!;
+    const city = body.city?.trim() ? body.city.trim() : null;
 
     const seasonSlugCanonical = canonicalSeasonSlugFromQuiz(seasonRaw);
     const excursion = normalizeExcursionRu(excursionRaw);
+
+    const mlUrl = env.ML_QUIZ_ROUTE_URL;
+    if (!mlUrl) {
+      console.log(
+        "[quiz/from-quiz] ML не вызывается: в .env нет ML_QUIZ_ROUTE_URL (полный URL …/v1/quiz/route). Пересоберите бэк после правки .env: npm run build",
+      );
+    } else {
+      try {
+        const mlFetch = await fetchMlQuizPlaceIds(mlUrl, env.ML_QUIZ_ROUTE_TIMEOUT_MS, {
+          people_count: peopleCount,
+          season: seasonRaw.trim(),
+          budget_from: budgetFrom,
+          budget_to: budgetTo,
+          excursion_type: excursionRaw.trim(),
+          days_count: daysCount,
+          city,
+        });
+        const mlIds = mlFetch.ids;
+        console.log(
+          "[quiz/from-quiz] ML запрос:",
+          mlFetch.detail ?? "?",
+          "| raw ids:",
+          mlIds.length,
+          mlIds.slice(0, 10),
+        );
+
+        const orderedFromMl = await this.normalizeMlQuizPlaceIds(mlIds);
+        console.log(
+          "[quiz/from-quiz] после фильтра БД (активные места):",
+          orderedFromMl.length,
+          "остановок",
+          orderedFromMl.slice(0, 10),
+        );
+
+        if (orderedFromMl.length >= 2) {
+          return await this.finalizeQuizRouteFromPlaceIds(
+            userId,
+            body,
+            orderedFromMl,
+            seasonSlugCanonical,
+            excursionRaw,
+            undefined,
+            undefined,
+            "ml",
+          );
+        }
+
+        if (mlIds.length >= 2 && orderedFromMl.length < 2) {
+          console.warn(
+            "[quiz/from-quiz] ML вернул id, которых нет или они неактивны в вашей Postgres — синхронизируйте каталог с ML или проверьте places.id / is_active. Переход на rule-based.",
+          );
+        } else if (mlIds.length < 2) {
+          console.warn("[quiz/from-quiz] ML не дал ≥2 id — rule-based.");
+        }
+      } catch (e) {
+        console.warn("[quiz/from-quiz] ML исключение:", e instanceof Error ? e.message : e);
+      }
+    }
+
     const perMin = budgetFrom / peopleCount;
     const perMax = budgetTo / peopleCount;
     const targetCount = Math.min(Math.max(daysCount + 2, 4), 15);
@@ -480,6 +542,7 @@ export class RoutesService {
       mainLimit,
       maxHotels: 1,
       maxRestaurants,
+      city,
     });
 
     let mainIds = clustered.mainIds;
@@ -493,6 +556,7 @@ export class RoutesService {
         perPersonBudgetMax: perMax,
         typePreferenceOrder: mainTypeOrder,
         limit: mainLimit,
+        city,
       });
     }
 
@@ -503,6 +567,7 @@ export class RoutesService {
         perPersonBudgetMax: 1_000_000_000,
         typePreferenceOrder: mainTypeOrder,
         limit: mainLimit,
+        city,
       });
     }
 
@@ -541,6 +606,7 @@ export class RoutesService {
         perPersonBudgetMax: 1_000_000_000,
         typePreferenceOrder: ["hotel", "guest_house", "recreation_base"],
         limit: 16,
+        city,
       });
       placeById = await loadPlaceMap([...new Set([...placeById.keys(), ...cand, ...mainIds])]);
       hotelIds = pickClosestPlaceIds(cand, mainIds, placeById, 1);
@@ -553,6 +619,7 @@ export class RoutesService {
         perPersonBudgetMax: 1_000_000_000,
         typePreferenceOrder: ["restaurant", "gastro"],
         limit: 16,
+        city,
       });
       const avoid = new Set([...mainIds, ...hotelIds]);
       const filtered = cand.filter((id) => !avoid.has(id));
@@ -572,23 +639,82 @@ export class RoutesService {
       throw new AppError(400, "Quiz route could not be built from the current place catalog");
     }
 
-    const seasonIdResolved = await this.resolveSeasonId(undefined, seasonSlugCanonical);
-    const records = await this.placesRepository.findManyByIds(placeIds);
-    placeById = new Map(records.map((p) => [p.id, p]));
-    const costById = new Map(records.map((p) => [p.id, p.estimatedCost]));
+    return await this.finalizeQuizRouteFromPlaceIds(
+      userId,
+      body,
+      placeIds,
+      seasonSlugCanonical,
+      excursionRaw,
+      undefined,
+      undefined,
+      "rules",
+    );
+  }
 
-    let totalCost = 0;
-    let withNumericCost = 0;
-    for (const pid of placeIds) {
-      const c = costById.get(pid);
-      if (c != null && Number.isFinite(c)) {
-        totalCost += c;
-        withNumericCost += 1;
-      }
+  /** ML `place_ids`: дедуп, только активные места из БД, порядок «запад → nearest-neighbor» без зигзагов. */
+  private async normalizeMlQuizPlaceIds(rawIds: number[]): Promise<number[]> {
+    const seen = new Set<number>();
+    const deduped: number[] = [];
+    for (const id of rawIds) {
+      if (!Number.isInteger(id) || id <= 0) continue;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      deduped.push(id);
+    }
+    if (deduped.length === 0) {
+      return [];
     }
 
-    const totalEstimatedCost = withNumericCost > 0 ? totalCost : null;
-    const totalEstimatedDurationMinutes = daysCount * 8 * 60;
+    const records = await this.placesRepository.findManyByIds(deduped);
+    const byId = new Map(records.map((p) => [p.id, p]));
+    const activeOrdered = deduped.filter((id) => {
+      const p = byId.get(id);
+      return p != null && p.isActive;
+    });
+    if (activeOrdered.length < 2) {
+      return activeOrdered;
+    }
+    const placeById = new Map(activeOrdered.map((id) => [id, byId.get(id)!]));
+    return orderQuizPlaceIdsGeographically(activeOrdered, placeById);
+  }
+
+  private async finalizeQuizRouteFromPlaceIds(
+    userId: string,
+    body: CreateRouteFromQuizBody,
+    placeIds: number[],
+    seasonSlugCanonical: string,
+    excursionRaw: string,
+    totalEstimatedCost?: number | null,
+    totalEstimatedDurationMinutes?: number | null,
+    routeBuildSource: "ml" | "rules" = "rules",
+  ): Promise<PublicRouteDetail> {
+    const peopleCount = body.people_count!;
+    const budgetFrom = body.budget_from!;
+    const budgetTo = body.budget_to!;
+    const daysCount = body.days_count!;
+
+    const seasonIdResolved = await this.resolveSeasonId(undefined, seasonSlugCanonical);
+    const records = await this.placesRepository.findManyByIds(placeIds);
+    const costById = new Map(records.map((p) => [p.id, p.estimatedCost]));
+
+    let costTotal = totalEstimatedCost;
+    let durationTotal = totalEstimatedDurationMinutes;
+
+    if (costTotal === undefined) {
+      let sum = 0;
+      let withNumeric = 0;
+      for (const pid of placeIds) {
+        const c = costById.get(pid);
+        if (c != null && Number.isFinite(c)) {
+          sum += c;
+          withNumeric += 1;
+        }
+      }
+      costTotal = withNumeric > 0 ? sum : null;
+    }
+    if (durationTotal === undefined) {
+      durationTotal = daysCount * 8 * 60;
+    }
 
     const autoTitle = `Маршрут: ${seasonLabelRu(seasonSlugCanonical)}, ${daysCount} дн.`;
     const title = body.title?.trim() ? body.title.trim() : autoTitle;
@@ -599,14 +725,20 @@ export class RoutesService {
         ? String(body.description).trim()
         : autoDescription;
 
+    const sourceLabel =
+      routeBuildSource === "ml"
+        ? "ML (POST …/v1/quiz/route → place_ids)"
+        : "rule-based (подбор из каталога на бэке)";
+    console.log(`[quiz/from-quiz] маршрут: ${sourceLabel} · остановок: ${placeIds.length}`);
+
     const routeId = await this.routesRepository.createRoute({
       ownerUserId: userId,
       title,
       description,
       creationMode: "quiz",
       seasonId: seasonIdResolved,
-      totalEstimatedCost,
-      totalEstimatedDurationMinutes,
+      totalEstimatedCost: costTotal ?? null,
+      totalEstimatedDurationMinutes: durationTotal ?? null,
       places: await this.buildSequentialRoutePlaces(placeIds),
     });
 
