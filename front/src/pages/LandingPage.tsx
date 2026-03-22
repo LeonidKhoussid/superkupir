@@ -1,11 +1,37 @@
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { Link, NavLink } from 'react-router-dom'
 import { LandingHeroMedia } from '../components/LandingHeroMedia'
 import { LandingPlacesCarousel } from '../components/LandingPlacesCarousel'
 import { LoginButton } from '../components/LoginButton'
 
 const HERO_LOGO_SRC = 'https://storage.yandexcloud.net/hackathon-ss/Group%201.svg'
 
+const navLinkClass =
+  'rounded-md px-1 py-1 text-[14px] font-semibold tracking-wide text-white transition hover:opacity-90 lg:text-[20px]'
+const navLinkActive = 'underline decoration-2 underline-offset-4'
+
 export function LandingPage() {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [mobileNavOpen])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileNavOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [mobileNavOpen])
+
   return (
     <>
       <a
@@ -16,10 +42,10 @@ export function LandingPage() {
       </a>
       <section className="relative min-h-[88dvh] overflow-hidden bg-[#0f172a] pb-16 pt-6 text-white sm:min-h-[90dvh] md:pb-24 md:pt-8 lg:min-h-[92dvh] lg:pb-28">
         <LandingHeroMedia />
-        <header className="relative z-10 mx-auto flex max-w-[1440px] items-center justify-between gap-4 px-5 sm:px-8 lg:px-14">
+        <header className="relative z-10 mx-auto flex max-w-[1440px] items-center justify-between gap-3 px-5 sm:gap-4 sm:px-8 lg:px-14">
           <Link
             to="/"
-            className="flex shrink-0 items-center drop-shadow-md"
+            className="flex min-w-0 shrink-0 items-center drop-shadow-md"
             aria-label="Край Тур — на главную"
           >
             <img
@@ -32,21 +58,113 @@ export function LandingPage() {
             />
           </Link>
           <nav
-            className="hidden flex-1 justify-center gap-8 text-[14px] ml-32 font-semibold tracking-wide text-white/95 drop-shadow-sm md:flex lg:gap-14 lg:text-[20px]"
+            className="ml-8 hidden flex-1 flex-wrap items-center justify-center gap-x-8 gap-y-1 text-[14px] font-semibold tracking-wide text-white/95 drop-shadow-sm sm:flex lg:gap-14 lg:text-[20px]"
             aria-label="Основная навигация"
           >
-            <Link to="/places" className="hover:opacity-90">
+            <NavLink
+              to="/places"
+              end
+              className={({ isActive }) => `${navLinkClass} ${isActive ? navLinkActive : ''}`}
+            >
               Места
-            </Link>
-            <Link to="/impressions" className="hover:opacity-90">
+            </NavLink>
+            <NavLink
+              to="/impressions"
+              end
+              className={({ isActive }) => `${navLinkClass} ${isActive ? navLinkActive : ''}`}
+            >
               Впечатления
-            </Link>
-            <Link to="/myroutes" className="hover:opacity-90">
+            </NavLink>
+            <NavLink
+              to="/myroutes"
+              end
+              className={({ isActive }) => `${navLinkClass} ${isActive ? navLinkActive : ''}`}
+            >
               Мои Туры
-            </Link>
+            </NavLink>
           </nav>
-          <LoginButton variant="on-hero" />
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Открыть меню"
+              aria-expanded={mobileNavOpen}
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/35 bg-white/10 text-white shadow-sm backdrop-blur-sm sm:hidden"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-6 w-6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden
+              >
+                <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
+              </svg>
+            </button>
+            <LoginButton variant="on-hero" />
+          </div>
         </header>
+
+        {mobileNavOpen
+          ? createPortal(
+              <div className="fixed inset-0 z-[95] sm:hidden">
+                <button
+                  type="button"
+                  className="absolute inset-0 bg-black/45"
+                  aria-label="Закрыть меню"
+                  onClick={() => setMobileNavOpen(false)}
+                />
+                <nav
+                  className="absolute right-0 top-0 flex h-full w-[min(88vw,280px)] flex-col gap-1 border-l border-sky-200 bg-white py-4 pl-4 pr-3 shadow-xl"
+                  aria-label="Меню навигации"
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <div className="mb-3 flex justify-end pr-1">
+                    <button
+                      type="button"
+                      onClick={() => setMobileNavOpen(false)}
+                      aria-label="Закрыть"
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-[1.5rem] leading-none text-neutral-500 hover:bg-neutral-100"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <NavLink
+                    to="/places"
+                    end
+                    onClick={() => setMobileNavOpen(false)}
+                    className={({ isActive }) =>
+                      `block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue ${isActive ? `bg-sky-50 ${navLinkActive}` : ''}`
+                    }
+                  >
+                    Места
+                  </NavLink>
+                  <NavLink
+                    to="/impressions"
+                    end
+                    onClick={() => setMobileNavOpen(false)}
+                    className={({ isActive }) =>
+                      `block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue ${isActive ? `bg-sky-50 ${navLinkActive}` : ''}`
+                    }
+                  >
+                    Впечатления
+                  </NavLink>
+                  <NavLink
+                    to="/myroutes"
+                    end
+                    onClick={() => setMobileNavOpen(false)}
+                    className={({ isActive }) =>
+                      `block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue ${isActive ? `bg-sky-50 ${navLinkActive}` : ''}`
+                    }
+                  >
+                    Мои Туры
+                  </NavLink>
+                </nav>
+              </div>,
+              document.body,
+            )
+          : null}
 
         <div
           id="main"
@@ -73,21 +191,23 @@ export function LandingPage() {
 
       <section
         id="how"
-        className="bg-white px-5 py-14 sm:px-8 sm:py-16 lg:px-14 lg:py-20 flex gap-12"
+        className="flex gap-12 bg-white px-5 py-14 max-sm:flex-col max-sm:gap-8 sm:px-8 sm:py-16 lg:px-14 lg:py-20"
       >
-        <div className="mx-auto max-w-[1440px]">
+        <div className="mx-auto max-w-[1440px] max-sm:w-full max-sm:min-w-0 max-sm:max-w-none">
           <h2 className="font-display text-left text-[clamp(1.35rem,3vw,2rem)] font-bold uppercase tracking-[0.12em] text-[#4385f5]">
             Как работает сервис
           </h2>
-          <p className="mt-6 max-w-2xl text-left text-[15px] leading-relaxed text-neutral-600 sm:text-[16px] font-bold">
-          Это сервис для планирования путешествий, который строится вокруг интересных мест и впечатлений, а не отелей. Пользователь выбирает локации или типы опыта, которые ему близки, а система сама собирает на их основе готовый маршрут — с логистикой, подходящим жильём и ресторанами поблизости.
-Сервис помогает туристу тем, что избавляет от сложного поиска
-и планирования: он предлагает уже проверенные
-и персонализированные маршруты, учитывая предпочтения пользователя и опыт других людей. В результате человек получает не просто набор точек, а цельное путешествие, которое удобно организовано и заранее понятно по формату
-и атмосфере.
+          <p className="mt-6 max-w-2xl text-left text-[15px] font-bold leading-relaxed text-neutral-600 max-sm:max-w-none max-sm:leading-[1.65] sm:text-[16px]">
+            Это сервис для планирования путешествий, который строится вокруг интересных мест и впечатлений, а не отелей. Пользователь выбирает локации или типы опыта, которые ему близки, а система сама собирает на их основе готовый маршрут — с логистикой, подходящим жильём и ресторанами поблизости.
+            Сервис помогает туристу тем, что избавляет от сложного поиска и планирования: он предлагает уже проверенные и персонализированные маршруты, учитывая предпочтения пользователя и опыт других людей. В результате человек получает не просто набор точек, а цельное путешествие, которое удобно организовано и заранее понятно по формату и атмосфере.
           </p>
         </div>
-        <img src="https://storage.yandexcloud.net/hackathon-ss/howItWorksImg.png"/>
+        <img
+          src="https://storage.yandexcloud.net/hackathon-ss/howItWorksImg.png"
+          alt=""
+          className="h-auto max-w-full shrink-0 max-sm:max-h-[min(48vh,380px)] max-sm:w-full max-sm:object-contain max-sm:object-center"
+          decoding="async"
+        />
       </section>
       <section id="cities" className="sr-only" aria-hidden />
     </>
