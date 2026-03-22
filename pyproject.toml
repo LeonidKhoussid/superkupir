@@ -1,0 +1,57 @@
+
+[project]
+name = "turmur"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "torch",
+    "torchaudio",
+    "huggingface-hub>=0.36.2",
+    "numpy>=2.4.3",
+    "qwen-tts>=0.1.1",
+    "sounddevice>=0.5.5",
+    "hf-xet>=1.4.2",
+    "faster-whisper>=1.2.1",
+    "sentence-transformers>=5.3.0",
+    "ortools>=9.15.6755",
+    "openai-whisper>=20250625",
+    "llama-cpp-python>=0.3.2",
+    "ddgs>=9.11.4",
+    "selenium>=4.41.0",
+    "beautifulsoup4>=4.14.3",
+    "requests>=2.32.5",
+    "fastapi>=0.135.1",
+    "uvicorn>=0.42.0",
+    "python-multipart>=0.0.22",
+    "python-dotenv>=1.2.2",
+    "psycopg[binary]>=3.2",
+    "pandas>=2.3.3",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "llama-cpp-python-cpu"
+url = "https://abetlen.github.io/llama-cpp-python/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130" }]
+torchaudio = [{ index = "pytorch-cu130" }]
+llama-cpp-python = [{ index = "llama-cpp-python-cpu" }]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+]

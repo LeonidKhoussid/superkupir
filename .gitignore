@@ -1,0 +1,12 @@
+.env
+.idea/
+.venv/
+.tech/
+.models/
+models/**/snapshots/
+models/**/hf_home/
+**/.cache/
+runtime/xtunnel/
+runtime/*.log
+__pycache__/
+**/__pycache__/

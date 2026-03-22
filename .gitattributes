@@ -1,0 +1,4 @@
+*.sh linguist-language=Shell
+*.py linguist-language=Python
+*.bat linguist-language=Batch
+*.ps1 linguist-language=PowerShell
