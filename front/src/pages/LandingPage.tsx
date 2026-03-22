@@ -39,7 +39,7 @@ export function LandingPage() {
               Места
             </Link>
             <a href="#cities" className="hover:opacity-90">
-              Города
+              Обзоры
             </a>
             <a href="#how" className="hover:opacity-90">
               Мои туры
