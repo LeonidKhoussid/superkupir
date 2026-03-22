@@ -15,8 +15,28 @@ import {
 } from '../features/posts/postPlaceHydration'
 import { fetchPostsList, PostsApiError, type PublicPostItem } from '../features/posts/postsApi'
 import { createRouteFromSelection, RoutesApiError } from '../features/routes/routesApi'
+import impressionsBonusPromo from '../assets/impressions-bonus-promo.png'
 
 const CATALOG_LOGO_SRC = 'https://storage.yandexcloud.net/hackathon-ss/logoPlace.svg'
+
+function PencilIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width={20}
+      height={20}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  )
+}
 
 const navLinkClass =
   'rounded-md px-1 py-1 text-[14px] font-semibold tracking-wide text-kr-blue transition hover:opacity-80 lg:text-[15px]'
@@ -430,6 +450,55 @@ export function ImpressionsPage() {
         </aside>
 
         <section className="min-w-0">
+          <div
+            className="mb-8 rounded-[28px] bg-sky-200 p-4 shadow-sm shadow-sky-900/6 sm:p-5 md:p-6 lg:mb-10"
+            role="region"
+            aria-labelledby="impressions-promo-heading"
+          >
+            <div className="flex flex-col gap-5 md:flex-row md:items-stretch md:gap-6 lg:gap-8">
+              <div className="shrink-0 overflow-hidden rounded-2xl bg-white/40 md:w-[min(100%,260px)] lg:w-[min(100%,300px)]">
+                <img
+                  src={impressionsBonusPromo}
+                  alt="Иллюстрация: десерты"
+                  className="aspect-[4/3] h-full w-full object-cover md:aspect-auto md:min-h-[160px] md:max-h-[200px] lg:max-h-[220px]"
+                  width={600}
+                  height={450}
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+              <div className="flex min-w-0 flex-1 flex-col justify-center gap-3 md:gap-4">
+                <h2
+                  id="impressions-promo-heading"
+                  className="font-display text-[clamp(1.05rem,2.2vw,1.35rem)] font-bold leading-tight tracking-wide text-neutral-900"
+                >
+                  Бонусы и подарки за ваши впечатления!
+                </h2>
+                <p className="max-w-xl text-[13px] leading-relaxed text-neutral-800 sm:text-[14px]">
+                  Поделитесь впечатлениями о построенном маршруте и получите бонусы/подарки от ресторанов и отелей.
+                </p>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!token) {
+                        requestAuthModalOpen()
+                      }
+                      setLeftTab('mine')
+                      window.requestAnimationFrame(() => {
+                        document.getElementById('impressions-main')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      })
+                    }}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-kr-blue px-6 py-2.5 text-[13px] font-bold uppercase tracking-wide text-white shadow-sm transition hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kr-blue sm:min-h-12 sm:px-8 sm:text-[14px]"
+                  >
+                    <PencilIcon className="size-5 shrink-0 text-white" />
+                    Поделиться впечатлениями
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {leftTab === 'community' ? (
             <>
               <h1 className="font-display text-[clamp(1.35rem,3vw,2rem)] font-bold uppercase tracking-[0.1em] text-neutral-900">
