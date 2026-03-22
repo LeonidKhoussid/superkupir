@@ -44,7 +44,7 @@ export class PlacesService {
 
     const result = await this.placesRepository.findRecommendations(input);
 
-    return {
+    const payload: PlaceRecommendationsResult = {
       items: result.items.map((item) => ({
         ...toPublicPlace(item),
         distance_km: item.distanceKm,
@@ -52,5 +52,11 @@ export class PlacesService {
       total: result.total,
       limit: input.limit,
     };
+
+    if (result.broadFallback) {
+      payload.recommendation_broad_fallback = true;
+    }
+
+    return payload;
   }
 }

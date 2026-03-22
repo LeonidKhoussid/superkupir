@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Link } from 'react-router-dom'
-import { getPrimaryDisplayPhotoUrl, type PublicPlace } from '../features/places/placesApi'
+import {
+  formatRecommendationDistanceKm,
+  getPrimaryDisplayPhotoUrl,
+  type PublicPlace,
+  type PublicPlaceRecommendation,
+} from '../features/places/placesApi'
 
 const SWIPE_THRESHOLD_PX = 100
 const ROTATE_PER_PX = 0.06
@@ -111,6 +116,9 @@ function SwipeCard({ place, onSkip, onLike, reducedMotion }: SwipeCardProps) {
 
   const region =
     place.source_location?.trim() || place.address?.trim() || 'Краснодарский край'
+  const distLabel = formatRecommendationDistanceKm(
+    (place as PublicPlaceRecommendation).distance_km,
+  )
   const excerpt = place.description?.trim()
     ? place.description.trim().length > 120
       ? `${place.description.trim().slice(0, 117)}…`
@@ -158,6 +166,14 @@ function SwipeCard({ place, onSkip, onLike, reducedMotion }: SwipeCardProps) {
         >
           {region.length > 28 ? `${region.slice(0, 25)}…` : region}
         </div>
+        {distLabel ? (
+          <div
+            className="pointer-events-none absolute left-3 top-10 max-w-[min(90%,220px)] truncate rounded-full bg-black/50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm"
+            aria-hidden
+          >
+            {distLabel}
+          </div>
+        ) : null}
 
         <div
           className="pointer-events-none absolute inset-0 flex items-center justify-center text-2xl font-black uppercase tracking-widest text-emerald-400 opacity-0 drop-shadow-lg"

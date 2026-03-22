@@ -107,7 +107,7 @@ type PlaceImportCandidate = {
   coordinatesRaw: string;
   dedupeKey: string;
   dedupeStrategy: DedupeStrategy;
-  syntheticExternalId: string;
+  importKey: string;
   distanceToCityKm: number | null;
   importConfidence: ImportConfidence;
   imageQualityRank: number;
@@ -341,7 +341,7 @@ const normalizeExternalIdValue = (value: string | null) =>
 const buildStableHash = (value: string) =>
   createHash("sha1").update(value).digest("hex").slice(0, 12);
 
-const buildSyntheticExternalId = (input: {
+const buildImportKey = (input: {
   source: string;
   rawExternalId: string | null;
   dedupeIdentity: string;
@@ -509,7 +509,7 @@ const buildImportPlan = (rows: CsvRow[]): PlaceImportPlan => {
       coordinatesRaw: `${latitude},${longitude}`,
       dedupeKey,
       dedupeStrategy,
-      syntheticExternalId: buildSyntheticExternalId({
+      importKey: buildImportKey({
         source: normalizeText(row.external_source) ?? "unknown",
         rawExternalId,
         dedupeIdentity,
@@ -648,9 +648,52 @@ const upsertSeasonSql = `
   RETURNING id
 `;
 
-const upsertPlaceSql = `
+const buildExistingPlaceNaturalKey = (input: {
+  name: string;
+  typeSlug: string;
+  latitude: number;
+  longitude: number;
+}) =>
+  `${normalizeKeyPart(input.name)}|${input.typeSlug}|${input.latitude.toFixed(5)}|${input.longitude.toFixed(5)}`;
+
+const buildPlaceMutationValues = (place: PlaceImportCandidate, typeId: number) => [
+  place.importKey,
+  typeId,
+  place.name,
+  place.description,
+  place.shortDescription,
+  place.address,
+  place.latitude,
+  place.longitude,
+  place.sourceLocation,
+  place.cardUrl,
+  null,
+  JSON.stringify(place.photoUrls),
+  place.estimatedCost,
+  place.estimatedDurationMinutes,
+  place.radiusGroup,
+  place.size,
+  place.coordinatesRaw,
+  place.isActive,
+  place.importConfidence,
+  place.distanceToCityKm === null ? null : Number(place.distanceToCityKm.toFixed(2)),
+];
+
+const selectExistingPlacesSql = `
+  SELECT
+    places.id,
+    places.import_key,
+    places.name,
+    place_types.slug AS type_slug,
+    places.latitude,
+    places.longitude
+  FROM places
+  INNER JOIN place_types ON place_types.id = places.type_id
+`;
+
+const insertPlaceSql = `
   INSERT INTO places (
-    external_id,
+    import_key,
     type_id,
     name,
     description,
@@ -692,27 +735,34 @@ const upsertPlaceSql = `
     $19,
     $20
   )
-  ON CONFLICT (external_id) DO UPDATE SET
-    type_id = EXCLUDED.type_id,
-    name = EXCLUDED.name,
-    description = EXCLUDED.description,
-    short_description = EXCLUDED.short_description,
-    address = EXCLUDED.address,
-    latitude = EXCLUDED.latitude,
-    longitude = EXCLUDED.longitude,
-    source_location = EXCLUDED.source_location,
-    card_url = EXCLUDED.card_url,
-    logo_url = EXCLUDED.logo_url,
-    photo_urls = EXCLUDED.photo_urls,
-    estimated_cost = EXCLUDED.estimated_cost,
-    estimated_duration_minutes = EXCLUDED.estimated_duration_minutes,
-    radius_group = EXCLUDED.radius_group,
-    size = EXCLUDED.size,
-    coordinates_raw = EXCLUDED.coordinates_raw,
-    is_active = EXCLUDED.is_active,
-    import_confidence = EXCLUDED.import_confidence,
-    city_distance_km = EXCLUDED.city_distance_km,
+  RETURNING id
+`;
+
+const updatePlaceSql = `
+  UPDATE places
+  SET
+    import_key = $1,
+    type_id = $2,
+    name = $3,
+    description = $4,
+    short_description = $5,
+    address = $6,
+    latitude = $7,
+    longitude = $8,
+    source_location = $9,
+    card_url = $10,
+    logo_url = $11,
+    photo_urls = $12::jsonb,
+    estimated_cost = $13,
+    estimated_duration_minutes = $14,
+    radius_group = $15,
+    size = $16,
+    coordinates_raw = $17,
+    is_active = $18,
+    import_confidence = $19,
+    city_distance_km = $20,
     updated_at = NOW()
+  WHERE id = $21
   RETURNING id
 `;
 
@@ -777,16 +827,35 @@ const main = async () => {
     let updatedCount = 0;
 
     if (plan.places.length > 0) {
-      const existingPlaceRows = await client.query<{ external_id: string }>(
-        `
-          SELECT external_id
-          FROM places
-          WHERE external_id = ANY($1::text[])
-        `,
-        [plan.places.map((place) => place.syntheticExternalId)],
-      );
+      const existingPlaceRows = await client.query<{
+        id: number;
+        import_key: string | null;
+        name: string;
+        type_slug: string;
+        latitude: number | null;
+        longitude: number | null;
+      }>(selectExistingPlacesSql);
 
-      const existingExternalIds = new Set(existingPlaceRows.rows.map((row) => row.external_id));
+      const existingByImportKey = new Map<string, number>();
+      const existingByNaturalKey = new Map<string, number>();
+
+      for (const row of existingPlaceRows.rows) {
+        if (row.import_key) {
+          existingByImportKey.set(row.import_key, row.id);
+        }
+
+        if (row.latitude !== null && row.longitude !== null) {
+          existingByNaturalKey.set(
+            buildExistingPlaceNaturalKey({
+              name: row.name,
+              typeSlug: row.type_slug,
+              latitude: row.latitude,
+              longitude: row.longitude,
+            }),
+            row.id,
+          );
+        }
+      }
 
       for (const place of plan.places) {
         const typeId = placeTypeIds.get(place.typeSlug);
@@ -795,28 +864,19 @@ const main = async () => {
           throw new Error(`No type id available for ${place.typeSlug}`);
         }
 
-        const placeResult = await client.query<{ id: number }>(upsertPlaceSql, [
-          place.syntheticExternalId,
-          typeId,
-          place.name,
-          place.description,
-          place.shortDescription,
-          place.address,
-          place.latitude,
-          place.longitude,
-          place.sourceLocation,
-          place.cardUrl,
-          null,
-          JSON.stringify(place.photoUrls),
-          place.estimatedCost,
-          place.estimatedDurationMinutes,
-          place.radiusGroup,
-          place.size,
-          place.coordinatesRaw,
-          place.isActive,
-          place.importConfidence,
-          place.distanceToCityKm === null ? null : Number(place.distanceToCityKm.toFixed(2)),
-        ]);
+        const naturalKey = buildExistingPlaceNaturalKey({
+          name: place.name,
+          typeSlug: place.typeSlug,
+          latitude: place.latitude,
+          longitude: place.longitude,
+        });
+        const placeValues = buildPlaceMutationValues(place, typeId);
+        const existingPlaceId =
+          existingByImportKey.get(place.importKey) ?? existingByNaturalKey.get(naturalKey);
+
+        const placeResult = existingPlaceId
+          ? await client.query<{ id: number }>(updatePlaceSql, [...placeValues, existingPlaceId])
+          : await client.query<{ id: number }>(insertPlaceSql, placeValues);
 
         const placeId = placeResult.rows[0]?.id;
 
@@ -824,11 +884,14 @@ const main = async () => {
           throw new Error(`Failed to upsert place ${place.name}`);
         }
 
-        if (existingExternalIds.has(place.syntheticExternalId)) {
+        if (existingPlaceId) {
           updatedCount += 1;
         } else {
           insertedCount += 1;
         }
+
+        existingByImportKey.set(place.importKey, placeId);
+        existingByNaturalKey.set(naturalKey, placeId);
 
         await client.query(
           `

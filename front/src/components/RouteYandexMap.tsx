@@ -10,9 +10,18 @@ import {
   type YMapsRuntime,
 } from '../lib/yandexMapsLoader'
 
+export type RouteMapMetrics = {
+  distanceKm: number | null
+  durationMinutes: number | null
+  source: 'yandex-route' | 'polyline-fallback' | 'insufficient-points'
+}
+
 type Props = {
   orderedPlaces: PublicPlace[]
   apiKey: string | undefined
+  onMetricsChange?: (metrics: RouteMapMetrics) => void
+  /** Узкая колонка на странице маршрута: меньше min-height, высоту задаёт родитель. */
+  compact?: boolean
 }
 
 function addPolylineFallback(
@@ -37,15 +46,126 @@ function addPolylineFallback(
   }
 }
 
+function haversineDistanceKm(left: [number, number], right: [number, number]): number {
+  const toRadians = (value: number) => (value * Math.PI) / 180
+  const earthRadiusKm = 6371
+  const dLat = toRadians(right[0] - left[0])
+  const dLon = toRadians(right[1] - left[1])
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(left[0])) * Math.cos(toRadians(right[0])) * Math.sin(dLon / 2) ** 2
+
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function polylineDistanceKm(points: [number, number][]): number | null {
+  if (points.length < 2) {
+    return points.length === 1 ? 0 : null
+  }
+
+  let distanceKm = 0
+
+  for (let index = 1; index < points.length; index += 1) {
+    distanceKm += haversineDistanceKm(points[index - 1], points[index])
+  }
+
+  return Number.isFinite(distanceKm) ? distanceKm : null
+}
+
+function normalizeMetricNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+
+  return null
+}
+
+function extractRouteMetricValue(value: unknown): number | null {
+  if (typeof value === 'number' || typeof value === 'string') {
+    return normalizeMetricNumber(value)
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    const candidate = value as { value?: unknown }
+    return normalizeMetricNumber(candidate.value)
+  }
+
+  return null
+}
+
+function extractMultiRouteMetrics(multiRoute: unknown): {
+  distanceKm: number | null
+  durationMinutes: number | null
+} | null {
+  const route = (multiRoute as {
+    getActiveRoute?: () => { properties?: { get?: (key: string) => unknown } } | null
+    getRoutes?: () => { get?: (index: number) => { properties?: { get?: (key: string) => unknown } } | null }
+  })?.getActiveRoute?.() ??
+    (multiRoute as {
+      getRoutes?: () => { get?: (index: number) => { properties?: { get?: (key: string) => unknown } } | null }
+    })?.getRoutes?.()?.get?.(0) ??
+    null
+
+  const properties = route?.properties
+  const distanceMeters = extractRouteMetricValue(properties?.get?.('distance'))
+  const durationSeconds = extractRouteMetricValue(properties?.get?.('duration'))
+
+  if (distanceMeters == null && durationSeconds == null) {
+    return null
+  }
+
+  return {
+    distanceKm: distanceMeters == null ? null : distanceMeters / 1000,
+    durationMinutes: durationSeconds == null ? null : durationSeconds / 60,
+  }
+}
+
 /**
  * Карта маршрута: маркеры по порядку остановок + маршрут по дорогам (MultiRouter) или ломаная при сбое.
  */
-export function RouteYandexMap({ orderedPlaces, apiKey }: Props) {
+export function RouteYandexMap({
+  orderedPlaces,
+  apiKey,
+  onMetricsChange,
+  compact = false,
+}: Props) {
+  const minHClass = compact ? 'min-h-0' : 'min-h-[320px]'
+  const minHFallbackClass = compact ? 'min-h-[200px]' : 'min-h-[320px]'
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<YMapInstance | null>(null)
 
   const [mapReady, setMapReady] = useState(false)
   const [mapError, setMapError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!onMetricsChange) return
+
+    const points = orderedPlaces
+      .map((place) => getPlaceLatLon(place))
+      .filter((point): point is [number, number] => point !== null)
+
+    if (points.length < 2) {
+      onMetricsChange({
+        distanceKm: points.length === 1 ? 0 : null,
+        durationMinutes: null,
+        source: 'insufficient-points',
+      })
+      return
+    }
+
+    if (!apiKey) {
+      onMetricsChange({
+        distanceKm: polylineDistanceKm(points),
+        durationMinutes: null,
+        source: 'polyline-fallback',
+      })
+    }
+  }, [apiKey, onMetricsChange, orderedPlaces])
 
   useEffect(() => {
     if (!apiKey || !containerRef.current) return
@@ -134,6 +254,15 @@ export function RouteYandexMap({ orderedPlaces, apiKey }: Props) {
         map.geoObjects.add(multiRoute)
 
         let fallbackAdded = false
+        const emitRouteMetrics = () => {
+          const metrics = extractMultiRouteMetrics(multiRoute)
+          if (!metrics || !onMetricsChange) return
+          onMetricsChange({
+            distanceKm: metrics.distanceKm,
+            durationMinutes: metrics.durationMinutes,
+            source: 'yandex-route',
+          })
+        }
         const tryFallback = () => {
           if (fallbackAdded) return
           fallbackAdded = true
@@ -143,26 +272,47 @@ export function RouteYandexMap({ orderedPlaces, apiKey }: Props) {
             /* ignore */
           }
           addPolylineFallback(ymapsGlobal, map, pts)
+          onMetricsChange?.({
+            distanceKm: polylineDistanceKm(pts),
+            durationMinutes: null,
+            source: 'polyline-fallback',
+          })
           const b = map.geoObjects.getBounds()
           if (b) map.setBounds(b, { checkZoomRange: true, zoomMargin: 40 })
         }
 
+        multiRoute.model.events.add('requestsuccess', emitRouteMetrics)
         multiRoute.model.events.add('requestfail', tryFallback)
       } else {
         addPolylineFallback(ymapsGlobal, map, pts)
+        onMetricsChange?.({
+          distanceKm: polylineDistanceKm(pts),
+          durationMinutes: null,
+          source: 'polyline-fallback',
+        })
         const b = map.geoObjects.getBounds()
         if (b) map.setBounds(b, { checkZoomRange: true, zoomMargin: 40 })
       }
     } else if (pts.length === 1) {
+      onMetricsChange?.({
+        distanceKm: 0,
+        durationMinutes: null,
+        source: 'insufficient-points',
+      })
       try {
         map.setCenter(pts[0], 11, { duration: 0 })
       } catch {
         map.setCenter(pts[0], 11)
       }
     } else {
+      onMetricsChange?.({
+        distanceKm: null,
+        durationMinutes: null,
+        source: 'insufficient-points',
+      })
       map.setCenter(YANDEX_DEFAULT_CENTER, YANDEX_DEFAULT_ZOOM)
     }
-  }, [orderedPlaces, mapReady])
+  }, [onMetricsChange, orderedPlaces, mapReady])
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !containerRef.current) return
@@ -182,7 +332,7 @@ export function RouteYandexMap({ orderedPlaces, apiKey }: Props) {
   if (!apiKey) {
     return (
       <div
-        className="flex h-full min-h-[min(52vh,420px)] w-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 text-center lg:min-h-0"
+        className={`flex h-full ${minHFallbackClass} w-full flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 text-center`}
         role="region"
         aria-label="Карта недоступна"
       >
@@ -201,7 +351,7 @@ export function RouteYandexMap({ orderedPlaces, apiKey }: Props) {
   if (mapError) {
     return (
       <div
-        className="flex h-full min-h-[min(52vh,420px)] w-full flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white px-6 text-center lg:min-h-0"
+        className={`flex h-full ${minHFallbackClass} w-full flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white px-6 text-center`}
         role="region"
         aria-label="Ошибка карты"
       >
@@ -212,7 +362,9 @@ export function RouteYandexMap({ orderedPlaces, apiKey }: Props) {
   }
 
   return (
-    <div className="relative flex h-full min-h-[min(52vh,420px)] min-w-0 flex-col lg:min-h-0">
+    <div
+      className={`relative flex h-full ${minHClass} min-w-0 flex-col ${compact ? '' : 'flex-1'}`}
+    >
       {!mapReady ? (
         <div
           className="absolute inset-0 z-[1] flex items-center justify-center rounded-2xl bg-slate-100 text-[14px] text-neutral-500"
@@ -223,7 +375,7 @@ export function RouteYandexMap({ orderedPlaces, apiKey }: Props) {
       ) : null}
       <div
         ref={containerRef}
-        className="h-full min-h-[min(52vh,420px)] w-full flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner lg:min-h-0"
+        className={`h-full ${minHClass} w-full flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-inner`}
         role="application"
         aria-label="Карта маршрута"
       />

@@ -15,7 +15,6 @@ export class PlacesApiError extends Error {
 
 export interface PublicPlace {
   id: number
-  external_id: string
   name: string
   source_location: string | null
   card_url: string | null
@@ -40,6 +39,13 @@ export interface PublicPlace {
 /** Ответ POST /places/recommendations: место + расстояние до якоря (км), если есть. */
 export interface PublicPlaceRecommendation extends PublicPlace {
   distance_km: number | null
+}
+
+/** Подпись для UI: не показываем 0 / NaN / отрицательные значения. */
+export function formatRecommendationDistanceKm(km: number | null | undefined): string | null {
+  if (km == null || !Number.isFinite(km) || km <= 0) return null
+  if (km < 1) return `${Math.round(km * 1000)} м от точки`
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} км от точки`
 }
 
 export interface PlacesListResponse {
@@ -68,12 +74,11 @@ export function placeHasDisplayablePhoto(place: PublicPlace): boolean {
   return getPrimaryDisplayPhotoUrl(place) !== null
 }
 
-/**
- * Порядок для каталога мест: уникальный primary URL → тот же URL у нескольких мест → без фото.
- * Primary = `getPrimaryDisplayPhotoUrl` (первый непустой `photo_urls[0]` после trim).
- * Внутри каждой группы сохраняется исходный порядок массива `places`.
- */
-export function orderPlacesByCatalogImagePriority(places: PublicPlace[]): PublicPlace[] {
+function partitionPlacesByCatalogImagePriority(places: PublicPlace[]): {
+  unique: PublicPlace[]
+  duplicate: PublicPlace[]
+  noImage: PublicPlace[]
+} {
   const counts = new Map<string, number>()
   for (const p of places) {
     const url = getPrimaryDisplayPhotoUrl(p)
@@ -88,7 +93,39 @@ export function orderPlacesByCatalogImagePriority(places: PublicPlace[]): Public
     else if ((counts.get(url) ?? 0) === 1) unique.push(p)
     else duplicate.push(p)
   }
+  return { unique, duplicate, noImage }
+}
+
+/**
+ * Порядок для каталога мест: уникальный primary URL → тот же URL у нескольких мест → без фото.
+ * Primary = `getPrimaryDisplayPhotoUrl` (первый непустой `photo_urls[0]` после trim).
+ * Внутри каждой группы сохраняется исходный порядок массива `places`.
+ */
+export function orderPlacesByCatalogImagePriority(places: PublicPlace[]): PublicPlace[] {
+  const { unique, duplicate, noImage } = partitionPlacesByCatalogImagePriority(places)
   return [...unique, ...duplicate, ...noImage]
+}
+
+/**
+ * Те же три группы по фото, что и {@link orderPlacesByCatalogImagePriority}, но порядок внутри
+ * каждой группы перемешан (Fisher–Yates). `random01` должна вести себя как `Math.random`: [0, 1).
+ */
+export function orderPlacesByCatalogImagePriorityRandomized(
+  places: PublicPlace[],
+  random01: () => number,
+): PublicPlace[] {
+  const shuffle = <T,>(arr: T[]): T[] => {
+    const a = [...arr]
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(random01() * (i + 1))
+      const tmp = a[i]!
+      a[i] = a[j]!
+      a[j] = tmp
+    }
+    return a
+  }
+  const { unique, duplicate, noImage } = partitionPlacesByCatalogImagePriority(places)
+  return [...shuffle(unique), ...shuffle(duplicate), ...shuffle(noImage)]
 }
 
 /**
@@ -125,8 +162,11 @@ export const PLACES_PAGE_SIZE_EXPLORER = 25
 /** Максимальный `limit` для `GET /places` по контракту backend. */
 export const PLACES_LIST_MAX_LIMIT = 100
 
-/** Размер одной страницы `GET /places` при полной загрузке каталога `/places`. */
+/** Размер первой страницы каталога `/places` — нужен быстрый первый рендер, остальное догружается в фоне. */
 export const PLACES_CATALOG_FETCH_LIMIT = 24
+
+/** Размер фоновой догрузки каталога и модалки добавления остановок. */
+export const PLACES_BACKGROUND_FETCH_LIMIT = 100
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000').replace(
   /\/$/,
@@ -199,12 +239,8 @@ export const parsePublicPlace = (value: unknown): PublicPlace | null => {
   if (id === null) return null
   if (typeof name !== 'string') return null
 
-  const rawEx = value.external_id
-  const external_id = typeof rawEx === 'string' ? rawEx : ''
-
   return {
     id,
-    external_id,
     name,
     source_location: typeof value.source_location === 'string' ? value.source_location : null,
     card_url: typeof value.card_url === 'string' ? value.card_url : null,
@@ -307,6 +343,8 @@ export type PlaceRecommendationsRequest = {
   season_slug?: string
   season_id?: number
   anchor_place_id?: number
+  /** Ограничить выдачу типом места (`place_types.slug`), как у якоря. */
+  type_slug?: string
   exclude_place_ids?: number[]
   radius_km?: number
   limit?: number
@@ -316,6 +354,8 @@ export interface PlaceRecommendationsResponse {
   items: PublicPlaceRecommendation[]
   total: number
   limit: number
+  /** Сервер: якорный фильтр не дал строк — отдан более широкий сезонный срез. */
+  recommendation_broad_fallback?: boolean
 }
 
 const parsePlaceRecommendationsResponse = (value: unknown): PlaceRecommendationsResponse => {
@@ -336,7 +376,9 @@ const parsePlaceRecommendationsResponse = (value: unknown): PlaceRecommendations
   if (total === null || limit === null) {
     throw new PlacesApiError('Сервис вернул некорректный ответ.')
   }
-  return { items, total, limit }
+  const recommendation_broad_fallback =
+    value.recommendation_broad_fallback === true ? true : undefined
+  return { items, total, limit, recommendation_broad_fallback }
 }
 
 /**
@@ -359,6 +401,9 @@ export async function fetchPlaceRecommendations(
   }
   if (input.anchor_place_id !== undefined) {
     body.anchor_place_id = input.anchor_place_id
+  }
+  if (input.type_slug !== undefined && input.type_slug.trim() !== '') {
+    body.type_slug = input.type_slug.trim()
   }
 
   let response: Response
@@ -408,6 +453,18 @@ export const fetchPlacesList = (params: FetchPlacesParams = {}) => {
   return requestJson(`/places?${qs.toString()}`, parsePlacesListResponse)
 }
 
+export function appendUniquePlaces(
+  current: PublicPlace[],
+  incoming: PublicPlace[],
+): PublicPlace[] {
+  if (incoming.length === 0) return current
+
+  const seen = new Set(current.map((place) => place.id))
+  const uniqueIncoming = incoming.filter((place) => !seen.has(place.id))
+
+  return uniqueIncoming.length > 0 ? [...current, ...uniqueIncoming] : current
+}
+
 export type FetchAllPlacesOptions = {
   /** Параметр `limit` для каждого запроса; по умолчанию `PLACES_LIST_MAX_LIMIT`. Не больше backend-максимума. */
   pageLimit?: number
@@ -415,7 +472,7 @@ export type FetchAllPlacesOptions = {
 
 /**
  * Последовательно запрашивает страницы `GET /places`, пока не собраны все записи по `total`
- * (дедуп по `id` на случай пересечений). Каталог `/places` передаёт `pageLimit: PLACES_CATALOG_FETCH_LIMIT`.
+ * (дедуп по `id` на случай пересечений). Используется только там, где действительно нужна полная коллекция.
  */
 export async function fetchAllPlaces(options?: FetchAllPlacesOptions): Promise<PublicPlace[]> {
   const requested = options?.pageLimit ?? PLACES_LIST_MAX_LIMIT
@@ -444,7 +501,7 @@ export async function fetchAllPlaces(options?: FetchAllPlacesOptions): Promise<P
 }
 
 /**
- * GET /places/:id — внутренний числовой id из БД (не external_id).
+ * GET /places/:id — внутренний числовой id из БД.
  */
 export const fetchPlaceById = (id: number) =>
   requestJson(`/places/${encodeURIComponent(String(id))}`, (value: unknown) => {

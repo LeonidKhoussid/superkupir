@@ -6,7 +6,10 @@
 - Canonical init command: `npm run db:init:product`
 - Canonical CSV import: `back/src/scripts/import-places.ts`
 - Canonical import command: `npm run db:import:places`
-- Canonical CSV source: `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv`
+- Explicit-path import form when the repo-local CSV is absent: `npm run db:import:places -- /absolute/path/to/places_with_images_all_in_one_repriced_image_urls_updated.csv`
+- Canonical CSV source:
+  - default importer path: `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv`
+  - current verified dry-run path in this workspace: `/Users/leo/shduahdskja/places_with_images_all_in_one_repriced_image_urls_updated.csv`
 - Canonical runtime place table: `places`
 - Runtime API docs:
   - `GET /openapi.json`
@@ -28,6 +31,7 @@ Canonical:
 - `back/src/scripts/import-places.ts`
   - canonical transformation + import pipeline for places CSV data
   - reads the CSV source, normalizes rows, deduplicates candidates, upserts `place_types`, upserts `places`, and writes `place_seasons`
+  - canonical importer identity column is internal `places.import_key`, not a public `external_id`
 
 Helper / legacy-support SQL:
 - `back/sql/create_auth_tables.sql`
@@ -69,7 +73,10 @@ Dedupe rules:
 - Use raw `external_id` only when it is unique in the CSV
 - Otherwise dedupe by `name + city_used + type_name`
 - Final fallback: `name + coordinates`
-- Final canonical `places.external_id` is synthesized deterministically from source/raw id/hash so it remains unique even when the CSV raw ids collide
+- Final canonical `places.import_key` is synthesized deterministically from source/raw id/hash so importer writes remain idempotent even when the CSV raw ids collide
+- Existing place adoption strategy is:
+  - first exact `import_key`
+  - then fallback natural key `name + type_slug + rounded latitude/longitude`
 
 Row selection rules:
 - When a duplicate group exists, keep the candidate closest to the expected `city_used` center
@@ -163,7 +170,7 @@ Purpose:
 
 Key columns:
 - `id BIGSERIAL PRIMARY KEY`
-- `external_id TEXT UNIQUE`
+- `import_key TEXT NOT NULL UNIQUE`
 - `type_id BIGINT NOT NULL REFERENCES place_types(id)`
 - `name TEXT NOT NULL`
 - `description TEXT`
@@ -195,9 +202,11 @@ Important indexes:
 - `places_source_location_idx`
 - `places_radius_group_idx`
 - `places_lat_lon_idx`
+- `places_is_active_id_idx`
 
 Import note:
-- `import_confidence` and `city_distance_km` are backend/internal import metadata and are not required by the current public `/places` response contract.
+- `import_key`, `import_confidence`, and `city_distance_km` are backend/internal import metadata and are not required by the current public `/places` response contract.
+- Public `/places` and `/places/:id` payloads do not expose `import_key` or `external_id`; runtime clients should use only numeric `id`.
 
 ### `place_seasons`
 
@@ -329,6 +338,7 @@ Important constraints:
 Ownership model:
 - Owner is stored only on `routes.owner_user_id`.
 - `route_access` is for attached shared access, not for the owner row.
+- After `POST /routes/shared/:token/access`: if the link has `can_edit = true`, the row is typically `access_type = 'collaborator'` (same `routes.id` as the owner; full edit via authenticated `/routes/:id` and place endpoints, subject to `revision_number`). If `can_edit = false`, the row is `viewer` (read-only authenticated detail, no mutating saves).
 
 ### `route_share_links`
 
@@ -349,9 +359,12 @@ Important indexes:
 - `route_share_links_expires_at_idx`
 
 Sharing model:
-- `GET /routes/shared/:token` opens the route by token.
-- `POST /routes/shared/:token/access` attaches the route to an authenticated user's route list via `route_access`.
-- `PATCH /routes/shared/:token` updates the route through the token when `can_edit = true`.
+- `GET /routes/shared/:token` (без JWT) отдаёт полный `PublicRouteDetail` плюс поле `can_edit` для возможностей редактирования по токену; истёкшие ссылки (`expires_at`) не находятся.
+- `POST /routes/shared/:token/access` (с JWT) upsert в `route_access` на **тот же** `route_id`, что у ссылки: `collaborator` при `can_edit`, иначе `viewer`; ответ совпадает по смыслу с `GET /routes/:id` для владельца/участника. Дальше коллаборатор редактирует через обычный **`/routes/:id`** (не обязательно только `PATCH /routes/shared/:token`).
+- `PATCH /routes/shared/:token` обновляет маршрут по токену, если в `route_share_links` у ссылки `can_edit = true`.
+- SPA (фронтенд): публичная страница **`/routes/shared/:token`** вызывает `GET /routes/shared/:token` на API-origin из `VITE_API_BASE_URL`; пользовательская ссылка при шаринге собирается только из публичного origin приложения (`VITE_PUBLIC_APP_URL` или `window.location.origin`), не из хоста API.
+- Экран **`/routes/:id`**: создаёт ссылку через `POST /routes/:id/share`, в буфер копируется frontend-URL с токеном из ответа.
+- `GET /routes/:id` по-прежнему не отдаёт список получателей шаринга — блок «Поделились с» на review-странице остаётся статусным/заглушкой.
 
 ### `route_build_sessions`
 
@@ -443,7 +456,8 @@ Current role:
   - `PATCH /routes/:id/places/:routePlaceId`
   - `DELETE /routes/:id/places/:routePlaceId`
   - `PATCH /routes/shared/:token`
-- When the stored revision does not match the client revision, the backend returns `409 Route revision conflict`.
+- When the stored revision does not match the client revision, the backend returns `409 Route revision conflict` for **any** editor (owner or collaborator with edit access); no silent overwrite of a newer revision.
+- Current frontend save behavior on `/routes/:id` uses the route-place mutation endpoints above to persist add/remove/reorder edits; it does not yet PATCH route title/description/season from that screen. On `409`, the UI can reload the latest route from the server before retrying.
 
 ## Route build session behavior
 
@@ -464,8 +478,8 @@ Current role:
 
 - Share links are token-based and stored in `route_share_links`.
 - A token can be editable or read-only through `can_edit`.
-- A shared route can be attached to a logged-in user through `route_access`.
-- Token-based editing is currently HTTP-only and protected by optimistic locking, not websockets or realtime merge logic.
+- A shared route can be attached to a logged-in user through `route_access` on the **same** route row as the owner (not a forked copy in the normal flow).
+- Token-based editing is HTTP-only and protected by optimistic locking; there is no live multi-user merge — collaborators must reload after a conflict.
 
 ## Current endpoint map
 
@@ -495,6 +509,15 @@ Current role:
   - `GET /places/:id`
   - `POST /places/recommendations`
 
+#### `POST /places/recommendations` (ranking + distance)
+
+- **Filters:** active places, required season (`season_id` or `season_slug`), optional `exclude_place_ids`, optional `anchor_place_id` with `radius_km`.
+- **Anchor relevance:** a candidate matches if it shares the anchor’s `radius_group`, or shares `source_location`, or lies within `radius_km` of the anchor using **effective coordinates** (numeric `latitude`/`longitude`, else a parsed `"lat,lon"` from `coordinates_raw` when it matches a simple pattern).
+- **`distance_km`:** computed for every returned row whenever both anchor and candidate have effective coordinates (independent of whether the row was admitted via `radius_group` / `source_location` / geo ring). Otherwise `null` (e.g. missing coords, or broad fallback without anchor context in the query).
+- **Ordering:** ascending `distance_km` (NULLS LAST), then prefer same `radius_group` as anchor (`IS NOT DISTINCT FROM`), then `places.id`.
+- **`recommendation_broad_fallback`:** optional boolean on the JSON response — `true` if the anchored filter returned **zero** rows and the service fell back to a **season + exclude-only** slice so the client can explain wider results.
+- Optional **`type_slug`:** when present, results are additionally restricted to `place_types.slug = type_slug` (used by `/places` route builder to show a small same-category shortlist after the first selection).
+
 ### Place interactions
 
 - Public:
@@ -517,7 +540,11 @@ Current role:
 
 - Auth required:
   - `POST /routes/from-quiz`
+    - **Продуктовый контракт (квиз):** тело с полями `people_count`, `season` (`spring` | `summer` | `autumn` | `winter` | `fall`; значение `fall` нормализуется в `autumn` для БД), `budget_from`, `budget_to`, `excursion_type` (`активный` | `умеренный` | `спокойный`, регистр не важен), `days_count`; опционально `title`, `description`. Маршрут с `creation_mode = quiz`: **доминирующий `radius_group`** среди мест сезона+бюджета; основные точки (не отель/не еда) только в этом кластере; отдельно **отель** и **рестораны** в том же `radius_group` (или ближайшие к центроиду основных при отсутствии). Порядок: основные по карте (запад, nearest-neighbor), еда около середины, отель последним. Fallback и оценки стоимости/длительности — как ранее в спецификации квиза.
+    - **Legacy:** вместо полей выше можно передать `quiz_answers` (объект) и при необходимости `season_slug`, `desired_place_count`, `generated_place_ids` — прежнее поведение подборки по рекомендациям.
   - `GET /routes`
+    - default `scope=accessible`: owned + shared-access routes
+    - optional `scope=owned`: owner-created routes only
   - `POST /routes`
   - `GET /routes/:id`
   - `PATCH /routes/:id`
@@ -530,6 +557,18 @@ Current role:
 - Public:
   - `GET /routes/shared/:token`
   - `PATCH /routes/shared/:token`
+
+Current UI assumptions:
+- `/myroutes` consumes only `GET /routes?scope=owned`.
+- `/routes/:id` consumes:
+  - `GET /routes/:id`
+  - `POST /routes/:id/places`
+  - `PATCH /routes/:id/places/:routePlaceId`
+  - `DELETE /routes/:id/places/:routePlaceId`
+  - `POST /routes/:id/share`
+- `/routes/shared/:token` (гостевой просмотр): `GET /routes/shared/:token`; опционально для залогиненных — `POST /routes/shared/:token/access` и редирект на `/routes/:id`.
+- The route-review page derives duration / budget / season display client-side when the route detail payload does not already provide a final display value.
+- The route-review page builds the final copied share URL on the frontend from the returned token (`id`, `route_id`, `token`, `can_edit`, `expires_at`, `created_at` в JSON) instead of exposing a backend-origin URL to the user.
 
 ### Posts
 
@@ -558,7 +597,7 @@ Current role:
 
 ## Known limitations
 
-- ML route generation is still a placeholder boundary. `POST /routes/from-quiz` stores the route but does not call a real ML service yet.
+- `POST /routes/from-quiz` не вызывает внешних ML/нейросетевых сервисов: подбор мест rule-based по ответам квиза и данным `places` (см. описание эндпоинта выше).
 - Legacy databases still need the canonical bootstrap to be executed for the FK repair steps to run. Until `npm run db:init:product` is actually applied against that database, old `place_likes` / `place_comments` constraints may still point at `wineries`.
 - The canonical CSV contains severe raw `external_id` collisions and many geographically implausible duplicates, so importer heuristics are required to produce stable canonical places.
 - Far-distance rows are now retained as low-confidence imports instead of being dropped, so downstream consumers should not assume every imported place is equally geo-trustworthy.

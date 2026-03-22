@@ -45,7 +45,6 @@ interface RoutePlaceRow extends QueryResultRow {
   stay_duration_minutes: number | null;
   route_place_created_at: Date;
   route_place_updated_at: Date;
-  external_id: string | null;
   name: string;
   source_location: string | null;
   card_url: string | null;
@@ -132,7 +131,6 @@ const mapRouteSummary = (row: RouteSummaryRow): RouteSummaryRecord => ({
 
 const mapPublicPlace = (row: RoutePlaceRow): PublicPlace => ({
   id: row.place_id,
-  external_id: row.external_id,
   name: row.name,
   source_location: row.source_location,
   card_url: row.card_url,
@@ -212,7 +210,6 @@ const routePlacesSelect = `
     route_places.stay_duration_minutes,
     route_places.created_at AS route_place_created_at,
     route_places.updated_at AS route_place_updated_at,
-    places.external_id,
     places.name,
     places.source_location,
     places.card_url,
@@ -251,29 +248,42 @@ type Queryable = Pick<PoolClient, "query"> | typeof pool;
 export class RoutesRepository {
   async listAccessibleRoutes(
     userId: string,
-    pagination: { limit: number; offset: number },
+    pagination: { scope: "accessible" | "owned"; limit: number; offset: number },
   ): Promise<RouteSummaryRecord[]> {
-    const result = await pool.query<RouteSummaryRow>(
-      `
-        ${buildRouteSummarySelect(
-          "CASE WHEN routes.owner_user_id = $1 THEN 'owner' ELSE route_access.access_type END",
-        )}
-        LEFT JOIN route_access
-          ON route_access.route_id = routes.id
-         AND route_access.user_id = $1
-        WHERE routes.owner_user_id = $1
-           OR route_access.user_id = $1
-        GROUP BY
-          routes.id,
-          auth_users.id,
-          seasons.id,
-          route_access.access_type
-        ORDER BY routes.updated_at DESC, routes.id DESC
-        LIMIT $2
-        OFFSET $3
-      `,
-      [userId, pagination.limit, pagination.offset],
-    );
+    const result =
+      pagination.scope === "owned"
+        ? await pool.query<RouteSummaryRow>(
+            `
+              ${buildRouteSummarySelect("'owner'")}
+              WHERE routes.owner_user_id = $1
+              GROUP BY routes.id, auth_users.id, seasons.id
+              ORDER BY routes.updated_at DESC, routes.id DESC
+              LIMIT $2
+              OFFSET $3
+            `,
+            [userId, pagination.limit, pagination.offset],
+          )
+        : await pool.query<RouteSummaryRow>(
+            `
+              ${buildRouteSummarySelect(
+                "CASE WHEN routes.owner_user_id = $1 THEN 'owner' ELSE route_access.access_type END",
+              )}
+              LEFT JOIN route_access
+                ON route_access.route_id = routes.id
+               AND route_access.user_id = $1
+              WHERE routes.owner_user_id = $1
+                 OR route_access.user_id = $1
+              GROUP BY
+                routes.id,
+                auth_users.id,
+                seasons.id,
+                route_access.access_type
+              ORDER BY routes.updated_at DESC, routes.id DESC
+              LIMIT $2
+              OFFSET $3
+            `,
+            [userId, pagination.limit, pagination.offset],
+          );
 
     return result.rows.map(mapRouteSummary);
   }

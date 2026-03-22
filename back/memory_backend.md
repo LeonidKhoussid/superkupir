@@ -12,8 +12,9 @@
 - Frontend compatibility was preserved where practical:
   - auth contract is unchanged
   - `GET /places` and `GET /places/:id` remain available and still use snake_case public fields
+  - the public places contract now uses only numeric `id`; `external_id` is no longer exposed
   - place interaction endpoints remain under `/places/:id/...`
-- Frontend markdown files were read for compatibility context but not modified in this backend-only task.
+- Frontend memory files are used as compatibility context before backend contract changes so the public app flows stay aligned.
 
 # Current backend stack
 
@@ -125,6 +126,9 @@
 - Legacy compatibility table:
   - `wineries`
   - retained only as a migration source / compatibility bridge
+- Internal importer identity:
+  - `places.import_key`
+  - backend-only, not exposed in public API payloads
 - Helper-only SQL files that remain in the repo:
   - `back/sql/create_auth_tables.sql`
     - isolated helper, aligned with canonical `auth_users`
@@ -137,13 +141,15 @@
 
 - Canonical runtime table:
   - `places`
-- Public `GET /places` / `GET /places/:id` response contract intentionally preserves the existing snake_case shape:
-  - `external_id`
+- Public `GET /places` / `GET /places/:id` response contract intentionally preserves the existing snake_case shape for user-facing fields:
   - `source_location`
   - `card_url`
   - `logo_url`
   - `photo_urls`
   - `coordinates_raw`
+- Public place payloads no longer include `external_id`
+- Canonical runtime identifier is now only:
+  - `id`
 - Additional fields now available in the places response:
   - `short_description`
   - `type_slug`
@@ -153,9 +159,15 @@
   - `radius_group`
   - `is_active`
 - Internal-only place import metadata stored in `places`:
+  - `import_key`
   - `import_confidence`
   - `city_distance_km`
 - `GET /places/:id` still uses the internal numeric `places.id`
+- `GET /places` list performance path:
+  - first counts filtered rows
+  - then selects only the current page of `places.id`
+  - then hydrates detailed place rows + season slugs only for that page slice
+  - this keeps the paged list query cheaper for feed/catalog usage
 
 # Place taxonomy and seasonality
 
@@ -177,11 +189,15 @@
 - Recommendation strategy:
   - filters by season
   - excludes already seen/selected ids
-  - if an anchor place is present, prefers:
+  - if an anchor place is present, candidates must match **one of**:
     - same `radius_group`
-    - or same `source_location`
-    - or geo distance within the requested radius if coordinates exist
-- Response returns place records plus `distance_km`
+    - same `source_location`
+    - geo distance within `radius_km` using **effective coordinates** (DB lat/lon, or parsed `coordinates_raw` when it looks like `"lat,lon"`)
+- **`distance_km`:** filled whenever both anchor and candidate have effective coordinates, regardless of which of the three relevance rules admitted the row (not only the strict geo branch).
+- **Ordering:** `distance_km` ascending (nulls last), then same `radius_group` as anchor, then stable `places.id`.
+- **Broad fallback:** if the anchored filter returns no rows, the service runs a second **season + exclude-only** query and sets optional `recommendation_broad_fallback: true` in the JSON so clients can label wider results (distances are usually null in that path).
+- Optional **`type_slug`:** restricts candidates to a single place type (`place_types.slug`); `/places` uses it with a small `limit` so post-first-pick recommendations stay same-category.
+- Response returns place records plus `distance_km` and optional `recommendation_broad_fallback`.
 
 # Current place interactions model
 
@@ -239,11 +255,28 @@
   - `selection_builder`
   - `manual`
   - `shared_copy`
+- Route list behavior:
+  - `GET /routes` with default `scope=accessible` returns owned routes plus any routes attached through `route_access`
+  - `GET /routes?scope=owned` returns only routes where `routes.owner_user_id = current user id`
+  - frontend `/myroutes` uses `scope=accessible` so users see owned routes plus any row in `route_access` (collaborative edit or view-only)
+- Current `/routes/:id` page behavior against the backend contract:
+  - `GET /routes/:id` provides the route summary + ordered places for page load
+  - the frontend persists add/remove/reorder edits by chaining:
+    - `POST /routes/:id/places`
+    - `PATCH /routes/:id/places/:routePlaceId`
+    - `DELETE /routes/:id/places/:routePlaceId`
+  - the frontend respects optimistic locking via `revision_number` for all editors (owner and collaborators); `409 Route revision conflict` surfaces as an explicit conflict UI with reload-from-server (no silent overwrite)
+  - the frontend currently does not patch route title/description/season from `/routes/:id`; the save action only persists route-place composition/order
+  - the route page uses `POST /routes/:id/share` to create a temporary share token and builds the copied public URL on the frontend as `{VITE_PUBLIC_APP_URL || window.location.origin}/routes/shared/:token`; the SPA route `/routes/shared/:token` (`RouteSharedPage`) loads the route via public `GET /routes/shared/:token` and may call `POST /routes/shared/:token/access` when a logged-in user attaches the route
+  - the route detail payload still does not include concrete shared-recipient users, so the frontend shows placeholder/shared-link status text in the “Поделились с” panel
+  - the frontend `/routes/:id/panorama` page reuses the same `GET /routes/:id` payload (ordered `places` with embedded `place` objects including `lat`, `lon`, `photo_urls`, `type_slug`, descriptions) and the same route-place mutation chain for its “save” action; no new backend endpoints were added for panorama
 
 # Collaborative route editing
 
-- Conflict safety is implemented with `revision_number`.
-- The backend rejects stale writes with `409 Route revision conflict`.
+- **Same route row:** invited users work on `routes.id` the owner created; `route_access` grants non-owner access. No `shared_copy` is required for collaboration.
+- **Roles:** `owner` — full edit + delete route + create share links. `collaborator` (from share with `can_edit=true` via `POST /routes/shared/:token/access`) — same route-place and metadata mutations as owner, subject to `revision_number`. `viewer` — read-only. `shared` in `route_access` remains a legacy/edit bucket in code paths; attach flow uses `collaborator` or `viewer`.
+- Conflict safety is implemented with `revision_number` on `routes`; every successful mutating place/metadata operation bumps it.
+- The backend rejects stale writes with `409 Route revision conflict` (`ROUTE_REVISION_CONFLICT` in repository).
 - Route writes that depend on revision checking:
   - `PATCH /routes/:id`
   - `DELETE /routes/:id`
@@ -252,19 +285,22 @@
   - `DELETE /routes/:id/places/:routePlaceId`
   - `PATCH /routes/shared/:token`
 - Share-link behavior:
-  - `POST /routes/:id/share` creates a token
-  - `GET /routes/shared/:token` opens the route publicly
-  - `POST /routes/shared/:token/access` attaches the shared route to the authenticated user's route list
-  - `PATCH /routes/shared/:token` edits through the token when `can_edit` is enabled
+  - `POST /routes/:id/share` creates a token (`can_edit` stored on `route_share_links`); requires current user to have edit access (owner or collaborator).
+  - `GET /routes/shared/:token` returns public detail + `can_edit` flag.
+  - `POST /routes/shared/:token/access` upserts `route_access`: `collaborator` if link `can_edit`, else `viewer`, so the user can call authenticated `GET/PATCH /routes/:id` and place endpoints on the **same** route id.
+  - `PATCH /routes/shared/:token` edits through the token when `can_edit` is enabled (alternative to JWT route endpoints).
+- Frontend:
+  - Share URL is app-origin `/routes/shared/:token`; after attach, user edits at `/routes/:id` like the owner.
+  - `/myroutes` lists `scope=accessible` so collaborative routes appear with access badges.
+  - Conflict UX on save: reload latest route from server when `409`.
+- `GET /routes/:id` still does not return a recipient list for “shared with” chips.
 
 # Quiz route flow
 
 - `POST /routes/from-quiz`
-- Current behavior:
-  - accepts quiz payload and optional generated place ids
-  - persists a route with `creation_mode = 'quiz'`
-  - does not implement real ML yet
-  - if generated place ids are omitted, it falls back to the current recommendation query boundary
+- **Основной контракт (фронт квиза):** `people_count`, `season` (`spring` | `summer` | `autumn` | `winter` | `fall`, `fall` → `autumn`), `budget_from`, `budget_to`, `excursion_type` (`активный` | `умеренный` | `спокойный`), `days_count`; опционально `title`, `description`. **Кластер:** среди мест сезона и бюджета «на человека» выбирается доминирующий **`radius_group`**; **основные** остановки (без отелей и ресторанов) набираются только в этом районе через **`findPlacesForQuizClustered`** + приоритет типов **`mainAttractionTypePreferences`** (без перегруза виноделен). В тот же район отдельно подмешиваются **отель** (до 1) и **ресторан/гастро** (до 2); если в районе нет — глобальный пул и выбор ближайших к центроиду основных точек. **Порядок:** основные — запад → nearest-neighbor; еда вставляется около середины цепочки; отель в конце (**`mergeQuizRouteStops`**). Fallback основных: `findPlacesForQuizBuild` / рекомендации без hospitality. **Legacy-ветка** квиза по-прежнему без кластера. Суммарная стоимость и `days_count * 8 * 60` минут — как раньше.
+- **Legacy:** объект `quiz_answers` + опционально `season_slug`, `desired_place_count`, `generated_place_ids` — прежняя ветка через `findRecommendations` без якоря.
+- Нейросети / внешние ML API не используются.
 
 # Route build session flow
 
@@ -305,7 +341,11 @@
 - Canonical import dry run:
   - `npm run db:import:places -- --dry-run`
 - Import source:
-  - `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv`
+  - importer default still points to `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv`
+  - that repo-local CSV is currently absent in this workspace
+  - latest verified dry run used an explicit CLI path: `/Users/leo/shduahdskja/places_with_images_all_in_one_repriced_image_urls_updated.csv`
+- Explicit-path import form:
+  - `npm run db:import:places -- /absolute/path/to/places_with_images_all_in_one_repriced_image_urls_updated.csv`
 - Canonical bootstrap status:
   - `create_product_schema.sql` is now self-contained for a fresh product DB
   - it no longer depends on running `db:init:auth` first
@@ -331,7 +371,10 @@
   - raw `external_id` is only trusted as a dedupe key when it is unique in the CSV
   - when `external_id` collides, dedupe falls back to `name + city_used + type_name`
   - final fallback is `name + coordinates`
-  - canonical DB `external_id` is synthesized deterministically as a unique stable id using source/raw id/hash so it fits the schema even when the CSV raw ids collide
+  - canonical DB `import_key` is synthesized deterministically as a unique stable internal key using source/raw id/hash so the importer stays idempotent even when the CSV raw ids collide
+  - importer upsert/adoption strategy is:
+    - first exact match by `import_key`
+    - otherwise fallback match by natural key: `name + type_slug + rounded latitude/longitude`
   - duplicate groups are resolved by choosing the candidate closest to the expected city center, then by image quality, then by richer description / earlier row
 - Drop rules:
   - rows are dropped immediately only if `name` is missing or `latitude` / `longitude` is invalid
@@ -372,6 +415,12 @@
 - Public places endpoints stayed in place:
   - `GET /places`
   - `GET /places/:id`
+- Frontend now consumes the optimized paged list path and no longer expects `external_id` in public place payloads.
+- Frontend routes area now depends on:
+  - `GET /routes?scope=accessible` for `/myroutes` (owned + `route_access`)
+  - `GET /routes/:id` for route detail
+  - `POST /routes/:id/places`, `PATCH /routes/:id/places/:routePlaceId`, `DELETE /routes/:id/places/:routePlaceId` for route-detail save
+  - `POST /routes/:id/share` for share-token creation, with the final public URL assembled on the frontend
 - Place id convention stayed unchanged for the public contract:
   - internal numeric id
 - Place interaction endpoints stayed under `/places/:id/...`
@@ -401,17 +450,19 @@
 - Legacy databases still need the canonical bootstrap to be executed so the FK repair steps can move `place_likes` / `place_comments` onto canonical `places`.
 - Until `npm run db:init:product` is actually applied against a live database, the documented canonical structure should be treated as SQL-complete and dry-run-verified rather than DB-executed in this workspace.
 - Legacy winery source data does not contain real season metadata, so all seasons are attached during import as a temporary compatibility decision.
-- The new canonical CSV source has major raw `external_id` collisions and many coordinate candidates that are far from the expected city; the importer compensates with synthetic external ids, city-aware dedupe, and low-confidence import metadata instead of hard-dropping those rows.
+- The repo-local default CSV path for `npm run db:import:places` is currently absent in this workspace; importer verification requires passing an explicit CSV file path.
+- The new canonical CSV source has major raw `external_id` collisions and many coordinate candidates that are far from the expected city; the importer compensates with synthetic internal `import_key` values, city-aware dedupe, and low-confidence import metadata instead of hard-dropping those rows.
 - Low-confidence imports are currently stored only as backend/internal metadata in `places`; the public `/places` API does not surface that flag yet.
-- `POST /routes/from-quiz` is a persistence wrapper around a placeholder route-generation boundary, not a real ML integration.
 - No realtime collaboration or websocket merge resolution exists; route conflicts are handled by optimistic locking only.
+- Route detail still does not expose a concrete recipient list for “shared with”; the current frontend page therefore uses placeholder/shared-link status text rather than actual recipient chips.
+- The frontend share URL uses `/routes/shared/:token` under the public app origin; the shared-route screen is implemented and calls the backend API origin separately (`VITE_API_BASE_URL`), so split frontend/backend deployments remain valid.
 - Live DB-backed runtime verification is still limited by the existing PostgreSQL connectivity problem; current verification is compile/build/openapi/app-start and dry-run based.
 - A real `npm run db:import:places` attempt against the configured DB was started in this workspace but stalled at the connection layer and was stopped, so the importer is transformation-complete and dry-run verified but not confirmed against a live reachable DB from this environment.
 
 # Pending tasks
 
 - Introduce a real migration framework.
-- Add real ML integration behind `POST /routes/from-quiz`.
+- При необходимости — заменить rule-based ветку `POST /routes/from-quiz` на реальную ML-интеграцию (сейчас намеренно отсутствует).
 - Enrich place seasonality from product data instead of the current all-seasons fallback.
 - Add stronger geo/radius modeling if the product needs more precise nearby logic.
 - Add route/history or audit logging if collaboration becomes more complex.
@@ -443,3 +494,4 @@
   - in-process CORS preflight sanity for `PATCH`
   - canonical new-CSV dry run summary: 500 raw rows -> 432 kept places, 100 low-confidence imports, 0 validation drops
   - live `npm run db:import:places` attempt blocked by DB connection hang
+  - **2026-03-22:** `POST /places/recommendations` — effective coords from `coordinates_raw`, consistent `distance_km`, ordering, broad fallback flag — см. **`back/changes_backend.md`**

@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  fetchAllPlaces,
+  appendUniquePlaces,
+  fetchPlacesList,
   getPrimaryDisplayPhotoUrl,
   orderPlacesByCatalogImagePriority,
+  PLACES_BACKGROUND_FETCH_LIMIT,
+  PLACES_CATALOG_FETCH_LIMIT,
   type PublicPlace,
 } from '../features/places/placesApi'
 
@@ -34,24 +37,80 @@ function filterPlaces(list: PublicPlace[], query: string): PublicPlace[] {
 export function RouteAddStopModal({ open, onClose, existingPlaceIds, onPick }: Props) {
   const titleId = useId()
   const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const fetchSeqRef = useRef(0)
   const [search, setSearch] = useState('')
   const [catalog, setCatalog] = useState<PublicPlace[]>([])
+  const [catalogTotal, setCatalogTotal] = useState(0)
+  const [catalogHydrating, setCatalogHydrating] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   const [loadError, setLoadError] = useState<string | null>(null)
   const fetchAttemptedForOpenRef = useRef(false)
+  const deferredSearch = useDeferredValue(search)
 
   const fetchCatalog = useCallback(async () => {
+    const seq = ++fetchSeqRef.current
+    let hasVisibleCatalog = false
+
     setPhase('loading')
     setLoadError(null)
+    setCatalogHydrating(false)
+
     try {
-      const items = await fetchAllPlaces({ pageLimit: 24 })
-      setCatalog(orderPlacesByCatalogImagePriority(items))
+      const firstPage = await fetchPlacesList({
+        limit: PLACES_CATALOG_FETCH_LIMIT,
+        offset: 0,
+      })
+
+      if (seq !== fetchSeqRef.current) return
+
+      const firstCatalog = orderPlacesByCatalogImagePriority(firstPage.items)
+      setCatalog(firstCatalog)
+      setCatalogTotal(firstPage.total)
       setPhase('ok')
+
+      if (firstPage.items.length === 0) {
+        return
+      }
+
+      hasVisibleCatalog = true
+
+      if (firstPage.total <= firstPage.items.length) {
+        return
+      }
+
+      setCatalogHydrating(true)
+      let offset = firstPage.items.length
+
+      while (offset < firstPage.total) {
+        const nextPage = await fetchPlacesList({
+          limit: PLACES_BACKGROUND_FETCH_LIMIT,
+          offset,
+        })
+
+        if (seq !== fetchSeqRef.current) return
+        if (nextPage.items.length === 0) break
+
+        setCatalog((current) =>
+          orderPlacesByCatalogImagePriority(appendUniquePlaces(current, nextPage.items)),
+        )
+        setCatalogTotal(nextPage.total)
+        offset += nextPage.items.length
+      }
+
+      if (seq !== fetchSeqRef.current) return
+      setCatalogHydrating(false)
     } catch {
+      if (seq !== fetchSeqRef.current) return
+      if (hasVisibleCatalog || catalog.length > 0) {
+        setLoadError('Часть каталога не догрузилась. Уже загруженные места доступны.')
+        setCatalogHydrating(false)
+        return
+      }
       setLoadError('Не удалось загрузить каталог мест.')
       setPhase('error')
+      setCatalogHydrating(false)
     }
-  }, [])
+  }, [catalog.length])
 
   useEffect(() => {
     if (!open) return
@@ -62,15 +121,16 @@ export function RouteAddStopModal({ open, onClose, existingPlaceIds, onPick }: P
   useEffect(() => {
     if (!open) {
       fetchAttemptedForOpenRef.current = false
+      fetchSeqRef.current += 1
       return
     }
-    if (catalog.length > 0) return
+    if (catalogTotal > 0 && catalog.length >= catalogTotal) return
     if (fetchAttemptedForOpenRef.current) return
     fetchAttemptedForOpenRef.current = true
     queueMicrotask(() => {
       void fetchCatalog()
     })
-  }, [open, catalog.length, fetchCatalog])
+  }, [open, catalog.length, catalogTotal, fetchCatalog])
 
   useEffect(() => {
     if (!open) return
@@ -92,7 +152,7 @@ export function RouteAddStopModal({ open, onClose, existingPlaceIds, onPick }: P
   if (!open) return null
 
   const available = catalog.filter((p) => !existingPlaceIds.has(p.id))
-  const visible = filterPlaces(available, search)
+  const visible = filterPlaces(available, deferredSearch)
 
   const modal = (
     <div
@@ -142,6 +202,16 @@ export function RouteAddStopModal({ open, onClose, existingPlaceIds, onPick }: P
             className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-[15px] text-neutral-900 outline-none focus:border-kr-blue focus:ring-2 focus:ring-kr-blue/25"
             autoComplete="off"
           />
+          {phase === 'ok' ? (
+            <p className="mt-2 text-[12px] text-neutral-500">
+              {catalogHydrating
+                ? `Подгружаем весь каталог: ${catalog.length} из ${catalogTotal || catalog.length}.`
+                : `В каталоге доступно ${catalog.length} мест.`}
+            </p>
+          ) : null}
+          {phase === 'ok' && loadError ? (
+            <p className="mt-2 text-[12px] text-amber-700">{loadError}</p>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2 sm:px-3">

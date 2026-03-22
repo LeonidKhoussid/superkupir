@@ -11,7 +11,7 @@ import { useQuizStore } from './quizStore'
 
 type AnswerSlice = {
   peopleCount: number | null
-  seasons: SeasonSlug[]
+  season: SeasonSlug | null
   budget: QuizBudget
   restType: QuizRestType | null
   daysCount: number | null
@@ -23,8 +23,8 @@ function stepIsValid(step: QuizStepConfig, s: AnswerSlice): boolean {
       const v = step.answerKey === 'peopleCount' ? s.peopleCount : s.daysCount
       return v != null && Number.isFinite(v) && v >= step.min && v <= step.max
     }
-    case 'seasons':
-      return s.seasons.length >= 1
+    case 'season':
+      return s.season != null
     case 'budget':
       return (
         s.budget.from <= s.budget.to &&
@@ -42,13 +42,13 @@ export function QuizPage() {
   const step = useMemo(() => (Number.isFinite(id) ? getStepById(id) : undefined), [id])
 
   const peopleCount = useQuizStore((st) => st.peopleCount)
-  const seasons = useQuizStore((st) => st.seasons)
+  const season = useQuizStore((st) => st.season)
   const budget = useQuizStore((st) => st.budget)
   const restType = useQuizStore((st) => st.restType)
   const daysCount = useQuizStore((st) => st.daysCount)
 
   const setPeopleCount = useQuizStore((st) => st.setPeopleCount)
-  const toggleSeason = useQuizStore((st) => st.toggleSeason)
+  const setSeason = useQuizStore((st) => st.setSeason)
   const setBudgetFrom = useQuizStore((st) => st.setBudgetFrom)
   const setBudgetTo = useQuizStore((st) => st.setBudgetTo)
   const setRestType = useQuizStore((st) => st.setRestType)
@@ -56,7 +56,7 @@ export function QuizPage() {
 
   const canProceed =
     step != null &&
-    stepIsValid(step, { peopleCount, seasons, budget, restType, daysCount })
+    stepIsValid(step, { peopleCount, season, budget, restType, daysCount })
 
   if (!step || id < 1 || id > quizSteps.length) {
     return (
@@ -75,7 +75,10 @@ export function QuizPage() {
   }
 
   const nextPath = `/quiz/${step.id + 1}`
+  const prevPath = step.id > 1 ? `/quiz/${step.id - 1}` : null
   const isLast = step.id >= quizSteps.length
+  const stepIndex = step.id
+  const totalSteps = quizSteps.length
 
   const helper = step.helper
   const helperCenter = step.helperPlacement === 'center'
@@ -118,6 +121,24 @@ export function QuizPage() {
             </p>
           ) : null}
 
+          <p
+            className="mb-3 font-display text-[11px] font-bold uppercase tracking-[0.2em] text-white/85 sm:text-[12px]"
+            aria-live="polite">
+            Шаг {stepIndex} из {totalSteps}
+          </p>
+          <div
+            className="mb-6 h-1.5 w-full max-w-[320px] overflow-hidden rounded-full bg-white/20 sm:max-w-[400px]"
+            role="progressbar"
+            aria-valuenow={stepIndex}
+            aria-valuemin={1}
+            aria-valuemax={totalSteps}
+            aria-label={`Прогресс квиза: шаг ${stepIndex} из ${totalSteps}`}>
+            <div
+              className="h-full rounded-full bg-white transition-[width] duration-300 ease-out"
+              style={{ width: `${(stepIndex / totalSteps) * 100}%` }}
+            />
+          </div>
+
           <h1 className="font-display max-w-[540px] text-[clamp(1.35rem,2.4vw,2rem)] font-bold uppercase leading-[1.12] tracking-[0.08em] sm:text-[clamp(1.5rem,2.2vw,2.25rem)] sm:tracking-[0.1em]">
             {step.titleLines.map((line, idx) => (
               <span
@@ -131,36 +152,44 @@ export function QuizPage() {
 
           <div className="mt-8 sm:mt-10">{renderStepControls(step, {
             peopleCount,
-            seasons,
+            season,
             budget,
             restType,
             daysCount,
             setPeopleCount,
-            toggleSeason,
+            setSeason,
             setBudgetFrom,
             setBudgetTo,
             setRestType,
             setDaysCount,
           })}</div>
 
-          <div className="mt-10 flex justify-center sm:mt-12 lg:justify-start ">
-            {isLast ? (
-              canProceed ? (
-                <Link to="/quiz/done" className={doneLinkCls}>
-                  ДАЛЕЕ
+          <div className="mt-10 flex flex-col items-center gap-4 sm:mt-12 lg:items-start">
+            <div className="flex w-full max-w-[400px] flex-wrap items-center justify-center gap-3 sm:justify-start">
+              {prevPath ? (
+                <Link
+                  to={prevPath}
+                  className="font-display inline-flex min-h-[48px] min-w-[120px] items-center justify-center rounded-full border-2 border-white/80 bg-transparent px-8 text-[14px] font-bold uppercase tracking-[0.12em] text-white transition hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white">
+                  Назад
                 </Link>
+              ) : null}
+              {isLast ? (
+                canProceed ? (
+                  <Link to="/quiz/done" className={doneLinkCls}>
+                    Далее
+                  </Link>
+                ) : (
+                  <span
+                    className={`${doneLinkCls} cursor-not-allowed opacity-40`}
+                    aria-disabled="true"
+                    role="link">
+                    Далее
+                  </span>
+                )
               ) : (
-                <span
-                  className={`${doneLinkCls} cursor-not-allowed opacity-40`}
-                  aria-disabled="true"
-                  role="link"
-                >
-                  ДАЛЕЕ
-                </span>
-              )
-            ) : (
-              <QuizNextButton to={nextPath} disabled={!canProceed} />
-            )}
+                <QuizNextButton to={nextPath} disabled={!canProceed} />
+              )}
+            </div>
           </div>
         </div>
 
@@ -177,12 +206,12 @@ export function QuizPage() {
 
 type ControlsProps = {
   peopleCount: number | null
-  seasons: SeasonSlug[]
+  season: SeasonSlug | null
   budget: { from: number; to: number }
   restType: QuizRestType | null
   daysCount: number | null
   setPeopleCount: (v: number | null) => void
-  toggleSeason: (s: SeasonSlug) => void
+  setSeason: (s: SeasonSlug | null) => void
   setBudgetFrom: (v: number) => void
   setBudgetTo: (v: number) => void
   setRestType: (v: QuizRestType) => void
@@ -226,41 +255,29 @@ function renderStepControls(step: QuizStepConfig, p: ControlsProps) {
         </div>
       )
     }
-    case 'seasons':
+    case 'season':
       return (
-        <ul className="flex max-w-[520px] flex-col gap-4 sm:gap-5" role="list">
+        <ul
+          className="flex max-w-[520px] flex-col gap-4 sm:gap-5"
+          role="radiogroup"
+          aria-label="Сезон поездки">
           {step.options.map((opt) => {
-            const checked = p.seasons.includes(opt.slug)
+            const selected = p.season === opt.slug
             return (
               <li key={opt.slug}>
                 <label className="flex cursor-pointer items-center gap-4">
                   <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => p.toggleSeason(opt.slug)}
+                    type="radio"
+                    name={`quiz-season-${step.id}`}
+                    checked={selected}
+                    onChange={() => p.setSeason(opt.slug)}
                     className="peer sr-only"
                   />
                   <span
-                    className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-[10px] border-2 border-white/50 bg-white/10 shadow-sm peer-focus-visible:ring-2 peer-focus-visible:ring-white sm:h-[52px] sm:w-[52px] sm:rounded-[12px] peer-checked:border-white peer-checked:bg-white"
-                    aria-hidden
-                  >
-                    {checked ? (
-                      <svg
-                        width="24"
-                        height="18"
-                        viewBox="0 0 28 22"
-                        fill="none"
-                        className="text-[#3b82f6]"
-                        aria-hidden
-                      >
-                        <path
-                          d="M2 11.5L9.5 19L26 2"
-                          stroke="currentColor"
-                          strokeWidth="4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
+                    className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full border-2 border-white/50 bg-white/10 peer-focus-visible:ring-2 peer-focus-visible:ring-white sm:h-[52px] sm:w-[52px] peer-checked:border-white peer-checked:bg-white"
+                    aria-hidden>
+                    {selected ? (
+                      <span className="size-5 rounded-full bg-[#3b82f6]" aria-hidden />
                     ) : null}
                   </span>
                   <span className="font-display text-[15px] font-bold uppercase leading-tight tracking-[0.08em] text-white sm:text-[17px]">

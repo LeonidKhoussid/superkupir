@@ -1,17 +1,35 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { LoginButton } from '../components/LoginButton'
-import { PlacesSwipeDeck } from '../components/PlacesSwipeDeck'
+
+const PlacesSwipeDeck = lazy(() =>
+  import('../components/PlacesSwipeDeck').then((m) => ({ default: m.PlacesSwipeDeck })),
+)
 import { fetchSeasons, type CatalogSeason } from '../features/catalog/catalogApi'
 import { requestAuthModalOpen } from '../features/auth/authModalEvents'
 import { useAuthStore } from '../features/auth/authStore'
 import {
-  fetchAllPlaces,
+  appendUniquePlaces,
+  fetchPlacesList,
   fetchPlaceRecommendations,
+  formatRecommendationDistanceKm,
   getPrimaryDisplayPhotoUrl,
   orderPlacesByCatalogImagePriority,
+  orderPlacesByCatalogImagePriorityRandomized,
   PlacesApiError,
+  PLACES_BACKGROUND_FETCH_LIMIT,
   PLACES_CATALOG_FETCH_LIMIT,
   type PublicPlace,
   type PublicPlaceRecommendation,
@@ -22,19 +40,64 @@ import { createRouteFromSelection, RoutesApiError } from '../features/routes/rou
 const CATALOG_LOGO_SRC =
   'https://storage.yandexcloud.net/hackathon-ss/logoPlace.svg'
 
-type CatalogFetchResult =
-  | { ok: true; places: PublicPlace[] }
-  | { ok: false; message: string }
+/** Запрос к API с запасом: после отсечения типов уже в маршруте список всё ещё достаточно длинный. */
+const ROUTE_REC_FETCH_LIMIT = 32
+/** Сколько карточек оставляем в блоке рекомендаций после диверсификации. */
+const ROUTE_REC_DISPLAY_LIMIT = 24
+/**
+ * Если такой `type_slug` уже есть среди выбранных мест — в рекомендациях не больше стольких
+ * дополнительных карточек этого типа (остальные слоты — другие категории, по близости к якорю).
+ */
+const ROUTE_REC_MAX_EXTRA_PER_SELECTED_TYPE = 3
 
-async function loadCatalogPlaces(): Promise<CatalogFetchResult> {
-  try {
-    const places = await fetchAllPlaces({ pageLimit: PLACES_CATALOG_FETCH_LIMIT })
-    return { ok: true, places }
-  } catch (e) {
-    const message =
-      e instanceof PlacesApiError ? e.message : 'Не удалось загрузить каталог мест.'
-    return { ok: false, message }
+function sortRecommendationsByDistance(
+  items: PublicPlaceRecommendation[],
+): PublicPlaceRecommendation[] {
+  const list = [...items]
+  list.sort((a, b) => {
+    const da = a.distance_km
+    const db = b.distance_km
+    if (da != null && db != null && da !== db) return da - db
+    if (da != null && db == null) return -1
+    if (da == null && db != null) return 1
+    return a.id - b.id
+  })
+  return list
+}
+
+/**
+ * `items` — по возрастанию `distance_km`. Сужаем повторяющиеся категории, уже представленные в маршруте.
+ */
+function diversifyRecommendationsBySelectedTypes(
+  items: PublicPlaceRecommendation[],
+  selectedPlaces: PublicPlace[],
+  maxExtraPerType: number,
+  maxTotal: number,
+): PublicPlaceRecommendation[] {
+  const typesInCart = new Set<string>()
+  for (const p of selectedPlaces) {
+    const t = p.type_slug?.trim()
+    if (t) typesInCart.add(t)
   }
+  if (typesInCart.size === 0) {
+    return items.slice(0, maxTotal)
+  }
+  const counts = new Map<string, number>()
+  const out: PublicPlaceRecommendation[] = []
+  for (const place of items) {
+    if (out.length >= maxTotal) break
+    const t = place.type_slug?.trim()
+    if (!t || !typesInCart.has(t)) {
+      out.push(place)
+      continue
+    }
+    const c = counts.get(t) ?? 0
+    if (c < maxExtraPerType) {
+      out.push(place)
+      counts.set(t, c + 1)
+    }
+  }
+  return out
 }
 
 function normalizeSearch(s: string) {
@@ -61,12 +124,6 @@ function filterPlacesByQuery(places: PublicPlace[], query: string): PublicPlace[
     if (p.address?.toLowerCase().includes(q)) return true
     return false
   })
-}
-
-function formatDistanceKm(km: number | null | undefined): string | null {
-  if (km == null || !Number.isFinite(km)) return null
-  if (km < 1) return `${Math.round(km * 1000)} м от якоря`
-  return `${km < 10 ? km.toFixed(1) : Math.round(km)} км от якоря`
 }
 
 function AnchorToastThumb({ place }: { place: PublicPlace | null | undefined }) {
@@ -175,7 +232,7 @@ function CatalogPlaceCard({
   const badge =
     place.size?.trim() ||
     (place.source_location?.trim() ? place.source_location.trim().split(',')[0]?.trim() : '')
-  const distLabel = formatDistanceKm(distanceKm)
+  const distLabel = formatRecommendationDistanceKm(distanceKm)
 
   return (
     <article className="overflow-hidden rounded-2xl bg-white shadow-md shadow-sky-900/10 ring-1 ring-sky-100/90 transition hover:-translate-y-0.5 hover:shadow-lg">
@@ -223,6 +280,55 @@ function CatalogPlaceCard({
   )
 }
 
+/** Монтирует тяжёлую карточку только при приближении к вьюпорту — меньше работы на длинных сетках. */
+const CATALOG_CARD_IO_MARGIN = '280px 0px 400px 0px'
+
+/** Совпадает по высоте с областью `PlacesSwipeDeck`, чтобы не прыгал layout при lazy-chunk. */
+const MOBILE_DECK_FALLBACK_HEIGHT =
+  'h-[min(calc(100dvh-12.5rem),78dvh)] min-h-[280px]'
+
+function LazyMountCatalogCard({ children }: { children: ReactNode }) {
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const [visible, setVisible] = useState(
+    () => typeof IntersectionObserver === 'undefined',
+  )
+
+  useEffect(() => {
+    if (visible) return
+    const el = hostRef.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setVisible(true)
+            obs.disconnect()
+            return
+          }
+        }
+      },
+      { root: null, rootMargin: CATALOG_CARD_IO_MARGIN, threshold: 0.01 },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [visible])
+
+  if (visible) {
+    return <>{children}</>
+  }
+
+  return (
+    <div ref={hostRef} aria-busy="true">
+      <div
+        className="overflow-hidden rounded-2xl bg-white shadow-md shadow-sky-900/10 ring-1 ring-sky-100/90"
+        aria-hidden
+      >
+        <div className="aspect-[3/4] w-full min-h-[220px] animate-pulse bg-gradient-to-br from-slate-200 to-slate-100 sm:min-h-[260px] lg:min-h-[280px]" />
+      </div>
+    </div>
+  )
+}
+
 function SkeletonGrid() {
   return (
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -246,16 +352,49 @@ const SESSION_SWIPE_HINT_KEY = 'kray-places-swipe-hint-seen'
 
 const MOBILE_MAX_CSS = '(max-width: 639px)'
 
+/** Стабильный PRNG на визит страницы: порядок каталога не «прыгает» при догрузке страниц. */
+function createMulberry32(seed: number): () => number {
+  let a = seed >>> 0
+  if (a === 0) a = 0x9e3779b9
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function sortedPlaceIdsSignature(places: PublicPlace[]): string {
+  if (places.length === 0) return ''
+  const ids = places.map((p) => p.id)
+  ids.sort((a, b) => a - b)
+  return ids.join(',')
+}
+
+type CatalogVisualOrderCache = {
+  loadSeq: number
+  idsSignature: string
+  order: number[]
+}
+
 export function PlacesCatalogPage() {
   const navigate = useNavigate()
   const token = useAuthStore((s) => s.token)
+  const catalogLoadSeqRef = useRef(0)
+  const catalogVisualOrderRef = useRef<CatalogVisualOrderCache | null>(null)
 
   const [phase, setPhase] = useState<'loading' | 'ok' | 'empty' | 'error'>('loading')
   const [allPlaces, setAllPlaces] = useState<PublicPlace[]>([])
+  const [catalogTotal, setCatalogTotal] = useState(0)
+  const [catalogHydrating, setCatalogHydrating] = useState(false)
+  const [catalogHydrationError, setCatalogHydrationError] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [catalogShuffleSeed] = useState(() => 1 + Math.floor(Math.random() * 0x7ffffffe))
   const [seasons, setSeasons] = useState<CatalogSeason[]>([])
   const [seasonsError, setSeasonsError] = useState<string | null>(null)
+  const deferredQuery = useDeferredValue(query)
 
   const swipeHintTitleId = useId()
   const routeReviewTitleId = useId()
@@ -271,6 +410,7 @@ export function PlacesCatalogPage() {
   const activeSeasonSlug = useRouteCartStore((s) => s.activeSeasonSlug)
   const builderStarted = useRouteCartStore((s) => s.builderStarted)
   const recommendationItems = useRouteCartStore((s) => s.recommendationItems)
+  const recommendationsBroadFallback = useRouteCartStore((s) => s.recommendationsBroadFallback)
   const recommendationsStatus = useRouteCartStore((s) => s.recommendationsStatus)
   const recommendationsError = useRouteCartStore((s) => s.recommendationsError)
   const routeCreateLoading = useRouteCartStore((s) => s.routeCreateLoading)
@@ -282,6 +422,7 @@ export function PlacesCatalogPage() {
   const swipeRejectedIds = useRouteCartStore((s) => s.swipeRejectedIds)
   const resetBuilder = useRouteCartStore((s) => s.resetBuilder)
   const setRecommendationsLoading = useRouteCartStore((s) => s.setRecommendationsLoading)
+  const setRouteAnchor = useRouteCartStore((s) => s.setRouteAnchor)
   const setActiveSeasonId = useRouteCartStore((s) => s.setActiveSeasonId)
   const setRouteCreateLoading = useRouteCartStore((s) => s.setRouteCreateLoading)
   const setRouteCreateError = useRouteCartStore((s) => s.setRouteCreateError)
@@ -289,33 +430,89 @@ export function PlacesCatalogPage() {
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const swipeRejectedSet = useMemo(() => new Set(swipeRejectedIds), [swipeRejectedIds])
 
-  const applyFetchResult = useCallback((r: CatalogFetchResult) => {
-    if (r.ok) {
-      setErrorMessage(null)
-      if (r.places.length === 0) {
-        setAllPlaces([])
-        setPhase('empty')
-      } else {
-        setAllPlaces(r.places)
+  const runCatalogFetch = useCallback(() => {
+    const seq = ++catalogLoadSeqRef.current
+
+    setPhase('loading')
+    setErrorMessage(null)
+    setCatalogHydrationError(null)
+    setAllPlaces([])
+    setCatalogTotal(0)
+    setCatalogHydrating(false)
+
+    void (async () => {
+      let hasVisibleCatalog = false
+
+      try {
+        const firstPage = await fetchPlacesList({
+          limit: PLACES_CATALOG_FETCH_LIMIT,
+          offset: 0,
+        })
+
+        if (seq !== catalogLoadSeqRef.current) return
+
+        setCatalogTotal(firstPage.total)
+
+        if (firstPage.items.length === 0) {
+          setAllPlaces([])
+          setPhase('empty')
+          return
+        }
+
+        setAllPlaces(firstPage.items)
         setPhase('ok')
+        hasVisibleCatalog = true
+
+        if (firstPage.total <= firstPage.items.length) {
+          setCatalogHydrating(false)
+          return
+        }
+
+        setCatalogHydrating(true)
+
+        let offset = firstPage.items.length
+
+        while (offset < firstPage.total) {
+          const nextPage = await fetchPlacesList({
+            limit: PLACES_BACKGROUND_FETCH_LIMIT,
+            offset,
+          })
+
+          if (seq !== catalogLoadSeqRef.current) return
+          if (nextPage.items.length === 0) break
+
+          setAllPlaces((current) => appendUniquePlaces(current, nextPage.items))
+          setCatalogTotal(nextPage.total)
+          offset += nextPage.items.length
+        }
+
+        if (seq !== catalogLoadSeqRef.current) return
+        setCatalogHydrating(false)
+      } catch (error) {
+        if (seq !== catalogLoadSeqRef.current) return
+        setCatalogHydrating(false)
+        const message =
+          error instanceof PlacesApiError ? error.message : 'Не удалось загрузить каталог мест.'
+
+        if (hasVisibleCatalog) {
+          setCatalogHydrationError(message)
+          return
+        }
+
+        setAllPlaces([])
+        setCatalogTotal(0)
+        setErrorMessage(message)
+        setPhase('error')
       }
-    } else {
-      setErrorMessage(r.message)
-      setAllPlaces([])
-      setPhase('error')
-    }
+    })()
   }, [])
 
   useEffect(() => {
-    let cancelled = false
-    void loadCatalogPlaces().then((r) => {
-      if (cancelled) return
-      applyFetchResult(r)
-    })
+    runCatalogFetch()
     return () => {
-      cancelled = true
+      catalogLoadSeqRef.current += 1
     }
-  }, [applyFetchResult])
+  }, [runCatalogFetch])
 
   useEffect(() => {
     if (phase !== 'ok') return
@@ -394,15 +591,15 @@ export function PlacesCatalogPage() {
 
   const recSignature = useMemo(() => {
     const rej = [...swipeRejectedIds].sort((a, b) => a - b).join(',')
-    return `${selectedIds.join(',')}|${rej}`
-  }, [selectedIds, swipeRejectedIds])
+    return `${anchorPlaceId ?? ''}|${selectedIds.join(',')}|${rej}`
+  }, [anchorPlaceId, selectedIds, swipeRejectedIds])
 
   useEffect(() => {
     if (!builderStarted || !anchorPlaceId || !activeSeasonSlug) return
 
+    setRecommendationsLoading()
     const ctrl = new AbortController()
     const timer = window.setTimeout(() => {
-      setRecommendationsLoading()
       const st = useRouteCartStore.getState()
       const exclude_place_ids = [
         ...new Set([...st.selectedIds, ...st.swipeRejectedIds]),
@@ -413,15 +610,28 @@ export function PlacesCatalogPage() {
           anchor_place_id: anchorPlaceId,
           exclude_place_ids,
           radius_km: 80,
-          limit: 48,
+          limit: ROUTE_REC_FETCH_LIMIT,
         },
         { signal: ctrl.signal },
       )
         .then((res) => {
-          const st = useRouteCartStore.getState()
-          const hide = new Set([...st.selectedIds, ...st.swipeRejectedIds])
-          const next = res.items.filter((p) => !hide.has(p.id))
-          useRouteCartStore.getState().setRecommendationsResult(next)
+          const latest = useRouteCartStore.getState()
+          const hide = new Set([...latest.selectedIds, ...latest.swipeRejectedIds])
+          const selectedPlaces = latest.selectedIds
+            .map((id) => latest.placesById[String(id)])
+            .filter((p): p is PublicPlace => Boolean(p))
+          const raw = res.items.filter((p) => !hide.has(p.id))
+          const sorted = sortRecommendationsByDistance(raw)
+          const next =
+            latest.selectedIds.length >= 1
+              ? diversifyRecommendationsBySelectedTypes(
+                  sorted,
+                  selectedPlaces,
+                  ROUTE_REC_MAX_EXTRA_PER_SELECTED_TYPE,
+                  ROUTE_REC_DISPLAY_LIMIT,
+                )
+              : sorted.slice(0, ROUTE_REC_DISPLAY_LIMIT)
+          latest.setRecommendationsResult(next, res.recommendation_broad_fallback === true)
         })
         .catch((e: unknown) => {
           if (e instanceof DOMException && e.name === 'AbortError') return
@@ -429,7 +639,7 @@ export function PlacesCatalogPage() {
             e instanceof PlacesApiError ? e.message : 'Не удалось подобрать похожие места.'
           useRouteCartStore.getState().setRecommendationsError(msg)
         })
-    }, 320)
+    }, 160)
 
     return () => {
       window.clearTimeout(timer)
@@ -444,9 +654,7 @@ export function PlacesCatalogPage() {
   ])
 
   const handleRetry = () => {
-    setPhase('loading')
-    setErrorMessage(null)
-    void loadCatalogPlaces().then(applyFetchResult)
+    runCatalogFetch()
   }
 
   const handleAddToRoute = useCallback(
@@ -505,14 +713,57 @@ export function PlacesCatalogPage() {
   }, [navigate, resetBuilder, setRouteCreateError, setRouteCreateLoading, token])
 
   const filteredCatalog = useMemo(
-    () => filterPlacesByQuery(allPlaces, query),
-    [allPlaces, query],
+    () => filterPlacesByQuery(allPlaces, deferredQuery),
+    [allPlaces, deferredQuery],
   )
 
-  const sortedCatalogOnly = useMemo(
-    () => orderPlacesByCatalogImagePriority(filteredCatalog),
-    [filteredCatalog],
-  )
+  const sortedCatalogOnly = useMemo(() => {
+    if (normalizeSearch(deferredQuery)) {
+      return orderPlacesByCatalogImagePriority(filteredCatalog)
+    }
+    if (filteredCatalog.length === 0) {
+      return []
+    }
+
+    const loadSeq = catalogLoadSeqRef.current
+    const sig = sortedPlaceIdsSignature(filteredCatalog)
+    const cache = catalogVisualOrderRef.current
+    let orderIds: number[]
+
+    if (!cache || cache.loadSeq !== loadSeq) {
+      const ordered = orderPlacesByCatalogImagePriorityRandomized(
+        filteredCatalog,
+        createMulberry32(catalogShuffleSeed),
+      )
+      orderIds = ordered.map((p) => p.id)
+      catalogVisualOrderRef.current = { loadSeq, idsSignature: sig, order: orderIds }
+    } else if (cache.idsSignature === sig) {
+      orderIds = cache.order
+    } else {
+      const prevOrder = cache.order
+      const prevSet = new Set(prevOrder)
+      const kept = prevOrder.filter((id) => filteredCatalog.some((p) => p.id === id))
+      const incomingPlaces = filteredCatalog.filter((p) => !prevSet.has(p.id))
+      let nextOrder: number[]
+      if (incomingPlaces.length === 0) {
+        nextOrder = kept
+      } else {
+        const mixSeed = (catalogShuffleSeed ^ incomingPlaces[0]!.id) >>> 0
+        nextOrder = [
+          ...kept,
+          ...orderPlacesByCatalogImagePriorityRandomized(
+            incomingPlaces,
+            createMulberry32(mixSeed),
+          ).map((p) => p.id),
+        ]
+      }
+      catalogVisualOrderRef.current = { loadSeq, idsSignature: sig, order: nextOrder }
+      orderIds = nextOrder
+    }
+
+    const map = new Map(filteredCatalog.map((p) => [p.id, p]))
+    return orderIds.map((id) => map.get(id)).filter((p): p is PublicPlace => Boolean(p))
+  }, [filteredCatalog, deferredQuery, catalogShuffleSeed])
 
   const sortedCatalogVisible = useMemo(
     () => sortedCatalogOnly.filter((p) => !swipeRejectedSet.has(p.id)),
@@ -527,15 +778,20 @@ export function PlacesCatalogPage() {
     [selectedIds, placesById],
   )
 
-  const filteredRecommendations = useMemo(() => {
-    const q = filterPlacesByQuery(recommendationItems, query)
-    return q.filter((p) => !selectedIdSet.has(p.id) && !swipeRejectedSet.has(p.id))
-  }, [recommendationItems, query, selectedIdSet, swipeRejectedSet])
-
-  const sortedRecommendations = useMemo(
-    () => orderPlacesByCatalogImagePriority(filteredRecommendations),
-    [filteredRecommendations],
-  )
+  const sortedRecommendations = useMemo(() => {
+    const q = filterPlacesByQuery(recommendationItems, deferredQuery)
+    const filtered = q.filter((p) => !selectedIdSet.has(p.id) && !swipeRejectedSet.has(p.id))
+    const list = [...filtered]
+    list.sort((a, b) => {
+      const da = (a as PublicPlaceRecommendation).distance_km
+      const db = (b as PublicPlaceRecommendation).distance_km
+      if (da != null && db != null && da !== db) return da - db
+      if (da != null && db == null) return -1
+      if (da == null && db != null) return 1
+      return a.id - b.id
+    })
+    return list
+  }, [recommendationItems, deferredQuery, selectedIdSet, swipeRejectedSet])
 
   const recIdSet = useMemo(
     () => new Set(recommendationItems.map((p) => p.id)),
@@ -546,26 +802,13 @@ export function PlacesCatalogPage() {
     return sortedCatalogVisible.filter((p) => !selectedIdSet.has(p.id) && !recIdSet.has(p.id))
   }, [sortedCatalogVisible, selectedIdSet, recIdSet])
 
-  const sortedRecommendationsByDistance = useMemo(() => {
-    const list = [...sortedRecommendations]
-    list.sort((a, b) => {
-      const da = (a as PublicPlaceRecommendation).distance_km
-      const db = (b as PublicPlaceRecommendation).distance_km
-      if (da != null && db != null && da !== db) return da - db
-      if (da != null && db == null) return -1
-      if (da == null && db != null) return 1
-      return 0
-    })
-    return list
-  }, [sortedRecommendations])
-
   const showBuilderUi = builderStarted && phase === 'ok'
 
   const mobileDeckPlaces = useMemo(() => {
     const seen = new Set<number>()
     const out: PublicPlace[] = []
     if (showBuilderUi) {
-      for (const p of sortedRecommendationsByDistance) {
+      for (const p of sortedRecommendations) {
         if (seen.has(p.id)) continue
         seen.add(p.id)
         out.push(p)
@@ -584,13 +827,7 @@ export function PlacesCatalogPage() {
       out.push(p)
     }
     return out
-  }, [
-    showBuilderUi,
-    sortedRecommendationsByDistance,
-    catalogSupplement,
-    sortedCatalogVisible,
-    selectedIdSet,
-  ])
+  }, [showBuilderUi, sortedRecommendations, catalogSupplement, sortedCatalogVisible, selectedIdSet])
 
   const anchorName =
     anchorPlaceId != null ? placesById[String(anchorPlaceId)]?.name ?? null : null
@@ -649,9 +886,15 @@ export function PlacesCatalogPage() {
               <a href="/#places" className={navLinkClass}>
                 Впечатления
               </a>
-              <a href="/#how" className={navLinkClass}>
-                Как это работает
-              </a>
+              <NavLink
+                to="/myroutes"
+                className={({ isActive }) =>
+                  `${navLinkClass} ${isActive ? navLinkActive : ''}`
+                }
+                end
+              >
+                Мои Туры
+              </NavLink>
             </nav>
             <div className="flex shrink-0 items-center gap-2">
               <button
@@ -712,13 +955,16 @@ export function PlacesCatalogPage() {
                 >
                   Впечатления
                 </a>
-                <a
-                  href="/#how"
-                  className="block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue"
+                <NavLink
+                  to="/myroutes"
+                  end
                   onClick={() => setMobileNavOpen(false)}
+                  className={({ isActive }) =>
+                    `block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue ${isActive ? 'bg-sky-50 ' + navLinkActive : ''}`
+                  }
                 >
-                  Как это работает
-                </a>
+                  Мои Туры
+                </NavLink>
               </nav>
             </div>,
             document.body,
@@ -765,9 +1011,23 @@ export function PlacesCatalogPage() {
           </div>
         </div>
 
+        {phase === 'ok' ? (
+          <p className="mt-3 shrink-0 text-[12px] text-neutral-500 sm:text-[13px]">
+            {catalogHydrating
+              ? `Показываем первые места сразу, остальное догружается в фоне: ${allPlaces.length} из ${catalogTotal || allPlaces.length}.`
+              : `Каталог загружен: ${allPlaces.length} мест.`}
+          </p>
+        ) : null}
+
         {seasonsError ? (
           <p className="mt-2 shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-[12px] text-amber-900 sm:mt-6 sm:rounded-xl sm:px-4 sm:py-3 sm:text-[13px]">
             {seasonsError}
+          </p>
+        ) : null}
+
+        {phase === 'ok' && catalogHydrationError ? (
+          <p className="mt-2 shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-[12px] text-amber-900 sm:rounded-xl sm:px-4 sm:py-3 sm:text-[13px]">
+            {catalogHydrationError}
           </p>
         ) : null}
 
@@ -820,12 +1080,23 @@ export function PlacesCatalogPage() {
 
           {phase === 'ok' ? (
             <div className="flex min-h-0 flex-1 flex-col sm:hidden">
-              <PlacesSwipeDeck
-                deck={mobileDeckPlaces}
-                recommendationsLoading={showBuilderUi && recommendationsStatus === 'loading'}
-                onSkip={handleSwipeSkip}
-                onLike={handleAddToRoute}
-              />
+              <Suspense
+                fallback={
+                  <div
+                    className={`flex flex-1 flex-col items-center justify-center ${MOBILE_DECK_FALLBACK_HEIGHT}`}
+                  >
+                    <div className="size-10 animate-spin rounded-full border-2 border-kr-blue border-t-transparent" />
+                    <p className="mt-3 text-[13px] text-neutral-600">Готовим колоду…</p>
+                  </div>
+                }
+              >
+                <PlacesSwipeDeck
+                  deck={mobileDeckPlaces}
+                  recommendationsLoading={showBuilderUi && recommendationsStatus === 'loading'}
+                  onSkip={handleSwipeSkip}
+                  onLike={handleAddToRoute}
+                />
+              </Suspense>
             </div>
           ) : null}
 
@@ -842,11 +1113,13 @@ export function PlacesCatalogPage() {
                   <ul className="mt-5 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {selectedPlacesOrdered.map((place) => (
                       <li key={`sel-${place.id}`}>
-                        <CatalogPlaceCard
-                          place={place}
-                          inCart
-                          onAddToRoute={handleAddToRoute}
-                        />
+                        <LazyMountCatalogCard>
+                          <CatalogPlaceCard
+                            place={place}
+                            inCart
+                            onAddToRoute={handleAddToRoute}
+                          />
+                        </LazyMountCatalogCard>
                       </li>
                     ))}
                   </ul>
@@ -858,8 +1131,40 @@ export function PlacesCatalogPage() {
                   id="route-rec-heading"
                   className="font-display text-[15px] font-bold uppercase tracking-wide text-neutral-800"
                 >
-                  Рекомендации для вашего маршрута
+                  Следующие точки маршрута
                 </h2>
+                {anchorName ? (
+                  <p className="mt-2 max-w-3xl text-[13px] leading-snug text-neutral-600">
+                    Рекомендуем рядом с{' '}
+                    <span className="font-semibold text-neutral-800">«{anchorName}»</span>
+                    {activeSeasonSlug ? (
+                      <>
+                        {' '}
+                        в сезоне <span className="font-medium text-neutral-800">{activeSeasonSlug}</span>
+                      </>
+                    ) : null}
+                    . Добавленные и пропущенные места не попадают в подборку повторно.
+                    {selectedIds.length >= 1 ? (
+                      <>
+                        {' '}
+                        Категории, которые уже есть в маршруте, показываем реже (до{' '}
+                        {ROUTE_REC_MAX_EXTRA_PER_SELECTED_TYPE} новых карточек каждой); в приоритете —{' '}
+                        <span className="font-medium text-neutral-800">другие типы мест</span>, начиная с
+                        ближайших к якорю.
+                      </>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-[13px] text-neutral-600">
+                    Подборка обновляется при каждом изменении маршрута и якорной точки.
+                  </p>
+                )}
+                {recommendationsBroadFallback && recommendationsStatus === 'ok' ? (
+                  <p className="mt-3 max-w-3xl rounded-xl border border-amber-200/80 bg-amber-50/90 px-3 py-2 text-[12px] leading-snug text-amber-950">
+                    Рядом с этой точкой новых локаций почти не осталось — показываем более широкий список в
+                    выбранном сезоне. Расстояние до якоря может быть недоступно для части карточек.
+                  </p>
+                ) : null}
                 {recommendationsStatus === 'loading' ? (
                   <div className="mt-5">
                     <SkeletonGrid />
@@ -872,7 +1177,8 @@ export function PlacesCatalogPage() {
                 ) : null}
                 {recommendationsStatus === 'empty' ? (
                   <p className="mt-4 text-[14px] text-neutral-600">
-                    Рядом больше нет новых мест с учётом фильтров — загляните в каталог ниже.
+                    В этом сезоне не осталось новых мест с учётом фильтров — загляните в каталог ниже или
+                    смените сезон у якорной точки.
                   </p>
                 ) : null}
                 {recommendationsStatus === 'ok' && sortedRecommendations.length === 0 ? (
@@ -886,12 +1192,14 @@ export function PlacesCatalogPage() {
                       const dist = (place as PublicPlaceRecommendation).distance_km
                       return (
                         <li key={`rec-${place.id}`}>
-                          <CatalogPlaceCard
-                            place={place}
-                            inCart={selectedIdSet.has(place.id)}
-                            onAddToRoute={handleAddToRoute}
-                            distanceKm={dist}
-                          />
+                          <LazyMountCatalogCard>
+                            <CatalogPlaceCard
+                              place={place}
+                              inCart={selectedIdSet.has(place.id)}
+                              onAddToRoute={handleAddToRoute}
+                              distanceKm={dist}
+                            />
+                          </LazyMountCatalogCard>
                         </li>
                       )
                     })}
@@ -914,11 +1222,13 @@ export function PlacesCatalogPage() {
                   <ul className="mt-5 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {catalogSupplement.map((place) => (
                       <li key={`cat-${place.id}`}>
-                        <CatalogPlaceCard
-                          place={place}
-                          inCart={selectedIdSet.has(place.id)}
-                          onAddToRoute={handleAddToRoute}
-                        />
+                        <LazyMountCatalogCard>
+                          <CatalogPlaceCard
+                            place={place}
+                            inCart={selectedIdSet.has(place.id)}
+                            onAddToRoute={handleAddToRoute}
+                          />
+                        </LazyMountCatalogCard>
                       </li>
                     ))}
                   </ul>
@@ -931,11 +1241,13 @@ export function PlacesCatalogPage() {
             <ul className="hidden gap-6 sm:grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {sortedCatalogVisible.map((place) => (
                 <li key={place.id}>
-                  <CatalogPlaceCard
-                    place={place}
-                    inCart={selectedIdSet.has(place.id)}
-                    onAddToRoute={handleAddToRoute}
-                  />
+                  <LazyMountCatalogCard>
+                    <CatalogPlaceCard
+                      place={place}
+                      inCart={selectedIdSet.has(place.id)}
+                      onAddToRoute={handleAddToRoute}
+                    />
+                  </LazyMountCatalogCard>
                 </li>
               ))}
             </ul>
@@ -994,9 +1306,21 @@ export function PlacesCatalogPage() {
                 {selectedPlacesOrdered.map((p) => (
                   <span
                     key={`chip-${p.id}`}
-                    className="inline-flex max-w-full items-center gap-1 rounded-full bg-sky-100/90 py-1 pl-3 pr-1 text-[12px] font-medium text-neutral-800"
+                    className="inline-flex max-w-full items-center gap-0.5 rounded-full bg-sky-100/90 py-1 pl-1 pr-1 text-[12px] font-medium text-neutral-800"
                   >
-                    <span className="truncate">{p.name}</span>
+                    <button
+                      type="button"
+                      title="Сделать якорем для рекомендаций"
+                      aria-pressed={anchorPlaceId === p.id}
+                      onClick={() => setRouteAnchor(p.id)}
+                      className={`min-h-9 min-w-0 max-w-[200px] truncate rounded-full px-2 text-left transition ${
+                        anchorPlaceId === p.id
+                          ? 'bg-white font-semibold text-kr-blue ring-1 ring-kr-blue/30'
+                          : 'text-neutral-800 hover:bg-white/70'
+                      }`}
+                    >
+                      {p.name}
+                    </button>
                     <button
                       type="button"
                       className="flex size-8 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-white/80 hover:text-red-700"

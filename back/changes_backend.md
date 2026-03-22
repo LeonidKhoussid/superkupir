@@ -1,3 +1,268 @@
+[2026-03-22] - Совместное редактирование по шарингу: OpenAPI + согласование доков с `route_access` / `revision_number`
+
+Type: docs (OpenAPI + markdown; поведение модуля routes без изменений в этой записи)
+
+What changed:
+	•	**`openapi-spec.ts`**: уточнены описания **`POST /routes/shared/:token/access`**, **`GET/PATCH /routes/{id}`**, **`POST /routes/{id}/places`**, **`POST /routes/{id}/share`** — одна строка **`routes`**, выдача **`route_access`** (`collaborator` при `can_edit`, иначе `viewer`), оптимистичная блокировка **`revision_number`**, **`409`** при рассинхроне для владельца и коллабораторов.
+	•	**`memory_backend.md`**, **`backend_db_structure.md`**: роли владелец / коллаборатор / зритель, привязка к **`POST .../access`**, список **`GET /routes?scope=accessible`** на фронте для «Мои туры».
+
+Why it changed:
+	•	Шаринг должен явно документироваться как совместное редактирование **того же** маршрута с безопасными сохранениями, а не только просмотр по ссылке.
+
+Files touched: `back/src/swagger/openapi-spec.ts`, `back/memory_backend.md`, `back/backend_db_structure.md`, `back/changes_backend.md`
+
+Checks: `cd back && npm run check && npm run build`
+
+⸻
+
+[2026-03-22] - Документация шаринга: SPA `/routes/shared/:token` и публичный `GET /routes/shared/:token`
+
+Type: chore (docs; контракт без изменения runtime-кода модуля routes в этой задаче)
+
+What changed:
+	•	**`backend_db_structure.md`**: уточнена модель шаринга — публичный **`GET /routes/shared/:token`**, привязка **`POST /routes/shared/:token/access`**, сборка пользовательской ссылки только на frontend-origin; добавлены UI-допущения для **`RouteSharedPage`**.
+	•	**`memory_backend.md`**: снято упоминание о «pending» shared-screen; зафиксирована связка с фронтом.
+
+Why it changed:
+	•	Фронтенд реализовал экран общего доступа по токену; документация должна совпадать с фактическим E2E-потоком и разделением API vs public app URL.
+
+Files touched: `back/backend_db_structure.md`, `back/memory_backend.md`, `back/changes_backend.md`
+
+Checks: `cd back && npm run check && npm run build` (как часть общей проверки репозитория)
+
+⸻
+
+[2026-03-22] - `POST /routes/from-quiz`: отели/еда без day-budget, компакт основных точек
+
+Type: fix (quiz route hospitality + geo spread)
+
+What changed:
+	•	**`findPlacesForQuizClustered`**: доминирующий **`radius_group`** считается только по **не-hospitality** местам; выбор отеля и ресторана/гастро идёт с **широким** диапазоном `estimated_cost` (0…1e9), а не с «бюджетом на человека за день», иначе отели/ужины отсекались и в маршрут попадали одни винодельни.
+	•	**`routes.service`**: после финализации **`mainIds`** — **`compactMainPlaceIdsByCentroid`** (~95 км от центроида): отбрасываются дальние выбросы, чтобы линия маршрута не растягивалась на сотни км; для «умеренный»/«спокойный» винодельня сдвинута ниже в приоритете типов.
+
+Why it changed:
+	•	Пользовательский сценарий: в маршруте должны появляться отель и заведения питания, точки — географически ближе друг к другу.
+
+Files touched: `back/src/modules/places/places.repository.ts`, `back/src/modules/routes/routes.service.ts`, `back/changes_backend.md`
+
+Checks: `cd back && npm run check`
+
+⸻
+
+[2026-03-22] - `POST /routes/from-quiz`: кластер `radius_group`, отели/рестораны, разнообразие типов
+
+Type: feature / fix (quiz route realism)
+
+What changed:
+	•	**`places.repository`**: **`findPlacesForQuizClustered`** — доминирующий **`radius_group`**, основные места без отелей/ресторанов, отдельно отель и гастро/ресторан в том же районе.
+	•	**`routes.service`**: v2-квиз использует кластер; при пустом отеле/еде — глобальный пул кандидатов + **`pickClosestPlaceIds`** к центроиду основных точек; **`mergeQuizRouteStops`** (еда в середине, отель в конце); приоритеты **`mainAttractionTypePreferences`** без перегруза виноделен; рекомендации-fallback фильтруют hospitality.
+	•	Доки: **`memory_backend.md`**, **`backend_db_structure.md`**, **`changes_backend.md`**.
+
+Why it changed:
+	•	Маршрут не должен состоять только из виноделен по всему краю; нужны ночёвка/еда и точки в одном районе.
+
+Files touched: `back/src/modules/places/places.types.ts`, `back/src/modules/places/places.repository.ts`, `back/src/modules/routes/routes.service.ts`, `back/memory_backend.md`, `back/backend_db_structure.md`, `back/changes_backend.md`
+
+Checks: `cd back && npm run check && npm run build`
+
+⸻
+
+[2026-03-22] - `POST /routes/from-quiz`: гео-порядок остановок (запад → nearest-neighbor)
+
+Type: fix (quiz route polyline / UX)
+
+What changed:
+	•	**`routes.service`**: после выбора id мест для квиза (v2 и legacy) порядок **`sort_order`** пересчитывается: эффективные координаты как у рекомендаций (`lat`/`lon` или `coordinates_raw`), старт с **минимальной долготы**, далее **жадный nearest-neighbor** по грубой дистанции км; места без координат — в конец в исходном относительном порядке.
+
+Why it changed:
+	•	Подбор только по типу/сезону/id давал «зигзаги» на карте; нужен более логичный путь по региону.
+
+Files touched: `back/src/modules/routes/routes.service.ts`, `back/memory_backend.md`, `back/backend_db_structure.md`, `back/changes_backend.md`
+
+Checks: `cd back && npm run check && npm run build`
+
+⸻
+
+[2026-03-22] - `POST /routes/from-quiz`: продуктовый квиз + rule-based подбор мест
+
+Type: feature (quiz → saved route)
+
+What changed:
+	•	Тело запроса: основной набор **`people_count`**, **`season`** (spring/summer/autumn/winter/fall, `fall` → autumn в БД), **`budget_from`**, **`budget_to`**, **`excursion_type`** (активный/умеренный/спокойный), **`days_count`**; опционально **`title`**, **`description`**. Legacy по-прежнему: **`quiz_answers`** + опционально **`season_slug`**, **`desired_place_count`**, **`generated_place_ids`**.
+	•	**`routes.service`**: ветка v2 — подбор id через **`PlacesRepository.findPlacesForQuizBuild`** (сезон, бюджет на человека, порядок предпочтения **`place_types.slug`**), fallback без бюджета и сезонный fallback как у рекомендаций; **`total_estimated_cost`** и **`total_estimated_duration_minutes`** для квиз-маршрута.
+	•	**`places.repository`**: новый метод **`findPlacesForQuizBuild`**.
+	•	**`routes.schemas`**, OpenAPI **`CreateRouteFromQuizBody`**, документация **`memory_backend.md`**, **`backend_db_structure.md`**.
+
+Why it changed:
+	•	Хакатонный сценарий «квиз → сохранённый маршрут» без реальной ML-модели, с предсказуемой логикой на существующем каталоге мест.
+
+Files touched: `back/src/modules/places/places.types.ts`, `back/src/modules/places/places.repository.ts`, `back/src/modules/routes/routes.schemas.ts`, `back/src/modules/routes/routes.service.ts`, `back/src/modules/routes/routes.controller.ts`, `back/src/swagger/openapi-spec.ts`, `back/memory_backend.md`, `back/backend_db_structure.md`, `back/changes_backend.md`
+
+Checks: `cd back && npm run check && npm run build`
+
+⸻
+
+[2026-03-22] - `POST /places/recommendations`: optional `type_slug` filter (same-type shortlist)
+
+Type: feature
+
+What changed:
+	•	Optional body field **`type_slug`**: adds `place_types.slug = $n` to recommendation queries (anchored + season-only fallback).
+	•	`places.schemas.ts`, `places.types.ts`, `places.repository.ts`, OpenAPI **`PlaceRecommendationsRequest`**, docs in **`memory_backend.md`** / **`backend_db_structure.md`**.
+
+Why it changed:
+	•	Frontend `/places` route builder should, after the first pick, suggest only a few more places of the **same category** as the anchor.
+
+Files touched: `back/src/modules/places/places.schemas.ts`, `back/src/modules/places/places.types.ts`, `back/src/modules/places/places.repository.ts`, `back/src/swagger/openapi-spec.ts`, `back/memory_backend.md`, `back/backend_db_structure.md`, `back/changes_backend.md`
+
+Checks: `cd back && npm run check && npm run build`
+
+⸻
+
+[2026-03-22] - `POST /places/recommendations`: consistent distance_km, effective coords, ordering, broad fallback
+
+Type: feature / fix (recommendations)
+
+What changed:
+	•	`back/src/modules/places/places.repository.ts`: рекомендации с якорём строятся через CTE **`anchor`** с **eff_lat / eff_lon** — координаты из колонок или разбор **`coordinates_raw`** (простой шаблон `"lat,lon"`). **`distance_km`** считается для каждой строки, если у якоря и кандидата есть эффективные координаты, независимо от того, по какому из трёх правил (radius_group / source_location / радиус) кандидат прошёл фильтр. Сортировка: **`distance_km` ASC NULLS LAST**, затем совпадение **`radius_group`** с якорём, затем **`places.id`**. Если якорный фильтр дал **0** строк, выполняется fallback-запрос только по сезону и **`exclude_place_ids`**; в ответ добавляется флаг.
+	•	`back/src/modules/places/places.types.ts`, `places.service.ts`: опциональное поле ответа **`recommendation_broad_fallback`**.
+	•	`back/src/swagger/openapi-spec.ts`: задокументировано **`recommendation_broad_fallback`**.
+	•	`back/memory_backend.md`, `back/backend_db_structure.md`: описание контракта и поведения.
+
+Why it changed:
+	•	На фронте часто пропадал **`distance_km`** при совпадении по **`radius_group`/`source_location`**, хотя координаты у обеих точек были; нужна предсказуемая сортировка «ближе к якорю» и честный fallback, когда рядом больше нечего показать.
+
+Files touched:
+	•	back/src/modules/places/places.repository.ts
+	•	back/src/modules/places/places.types.ts
+	•	back/src/modules/places/places.service.ts
+	•	back/src/swagger/openapi-spec.ts
+	•	back/memory_backend.md
+	•	back/backend_db_structure.md
+	•	back/changes_backend.md
+
+Checks:
+	•	`cd back && npm run check` — успешно.
+	•	`cd back && npm run build` — успешно.
+	•	Загрузка собранного OpenAPI из `dist` — успешно.
+
+⸻
+
+[2026-03-22] - Panorama route page: no backend/API changes
+
+Type: chore (docs only)
+
+What changed:
+	•	Frontend added `/routes/:id/panorama` using the existing `GET /routes/:id` response (ordered places with coordinates, photos, types, text fields) and existing route-place write endpoints for save sync.
+	•	Documented in backend memory that no new routes module endpoints or response-shape changes were required for this feature.
+
+Why it changed:
+	•	Keep backend memory aligned with how the frontend consumes route detail for the new Google Street View flow.
+
+Files touched:
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+
+Checks:
+	•	`cd back && npm run check` — успешно.
+	•	`cd back && npm run build` — успешно.
+
+⸻
+
+[2026-03-22 08:15] - Clarify token-only share contract for the fixed `/routes/:id` page
+
+Type: chore
+
+What changed:
+	•	Documented that `/routes/:id` no longer treats the backend as the public share origin: the backend continues to return a token from `POST /routes/:id/share`, while the frontend now builds the final copied URL from its own public app origin.
+	•	Clarified that no backend runtime endpoint change was required for this fix pass: the existing token-based share response remains valid, and the route-review page only changed how it turns that token into a user-facing link.
+	•	Updated backend memory/DB-structure docs so the current contract explicitly states that frontend share URLs use the future-safe frontend route shape `/routes/shared/:token`.
+	•	Re-verified backend sanity with `npm run check`, `npm run build`, built OpenAPI load sanity, and `createApp()` startup sanity after the route-page fix pass.
+
+Why it changed:
+	•	The previous route-page implementation copied `http://localhost:3000/routes/shared/<token>`, which tied the user-facing share URL to the backend host and was not deployment-safe once frontend and backend live on different origins.
+
+Files touched:
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+	•	back/backend_db_structure.md
+
+⸻
+
+[2026-03-22 07:57] - Clarify route-detail save/share contract for the upgraded `/routes/:id` page
+
+Type: chore
+
+What changed:
+	•	Confirmed that the upgraded frontend `/routes/:id` page now uses the existing route contract without backend runtime code changes: `GET /routes/:id` for detail, `POST/PATCH/DELETE /routes/:id/places` for persisting add/remove/reorder edits, and `POST /routes/:id/share` for temporary share-link creation.
+	•	Documented that the current route detail payload still does not include concrete shared-recipient users, so the frontend intentionally renders a placeholder/shared-link status in the “Поделились с” block instead of a real recipient list.
+	•	Recorded the current temporary share behavior: the route page copies the backend shared-token URL `GET /routes/shared/:token` until a dedicated frontend deeplink screen exists.
+	•	Verified the existing backend route contract still compiles and boots cleanly with `npm run check`, `npm run build`, built OpenAPI load sanity, and `createApp()` startup sanity after the frontend integration work.
+
+Why it changed:
+	•	The route review page now depends on a real save/share flow, so backend memory and DB-structure docs need to reflect the current contract and its present limitations even though the backend code itself did not need a new endpoint for this iteration.
+
+Files touched:
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+	•	back/backend_db_structure.md
+
+⸻
+
+[2026-03-22 07:29] - Speed up paged places loading and remove canonical `external_id`
+
+Type: feature
+
+What changed:
+	•	Removed `external_id` from the canonical `places` runtime schema and public place serializer. `places` now keeps an internal-only `import_key` for canonical importer/upsert identity, while `/places` and `/places/:id` expose only the numeric `id`.
+	•	Updated `back/sql/create_product_schema.sql` so existing databases migrate old `external_id` values into `import_key`, drop the legacy column, add `places_is_active_id_idx`, and keep the legacy `wineries` bridge working through `import_key`.
+	•	Updated the canonical importer `back/src/scripts/import-places.ts` to stop storing/sending `external_id`, to upsert by internal `import_key`, and to fall back to a natural-key match (`name + type + rounded coordinates`) when adopting pre-existing place rows.
+	•	Updated the places and routes repositories plus OpenAPI so nested/public place payloads no longer include `external_id`.
+	•	Optimized `GET /places` list loading by first selecting only the paged place ids and then hydrating details/season slugs for that page slice, instead of expanding full place rows before pagination.
+	•	Verified `cd front && npm run lint`, `cd front && npm run build`, `cd back && npm run check`, `cd back && npm run build`, `cd back && npm run db:init:product -- --dry-run`, OpenAPI load sanity, app startup sanity, and `cd back && npm run db:import:places -- --dry-run /Users/leo/shduahdskja/places_with_images_all_in_one_repriced_image_urls_updated.csv`.
+
+Why it changed:
+	•	The biggest places-feed slowdown was frontend overfetching, but the backend also still carried legacy `external_id` fields through the canonical schema and place serializers.
+	•	The runtime app should use only canonical numeric `places.id`, while the importer still needs a stable internal identity for idempotent updates.
+
+Files touched:
+	•	back/sql/create_product_schema.sql
+	•	back/src/modules/places/places.repository.ts
+	•	back/src/modules/places/places.types.ts
+	•	back/src/modules/routes/routes.repository.ts
+	•	back/src/scripts/import-places.ts
+	•	back/src/swagger/openapi-spec.ts
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+	•	back/backend_db_structure.md
+
+⸻
+
+[2026-03-22 06:12] - Add owned-only route list scope for `/myroutes`
+
+Type: feature
+
+What changed:
+	•	Extended `GET /routes` with a backward-compatible query param `scope`, where `scope=owned` now returns only routes created by the authenticated user and the default `scope=accessible` keeps the previous owned + shared-access behavior.
+	•	Updated the routes query validation, service, and repository flow so `/myroutes` can consume a clean owned-routes contract without frontend-side filtering hacks.
+	•	Updated Swagger/OpenAPI for `GET /routes` to document the new `scope` query param and its default behavior.
+	•	Verified `npm run check`, `npm run build`, OpenAPI load sanity, and app startup sanity after the route-list contract change.
+
+Why it changed:
+	•	The new frontend `/myroutes` page must show only user-created routes in this iteration, while the general backend route model still supports shared access for later UI work.
+	•	A dedicated owned-only scope keeps the list contract explicit and avoids coupling the frontend to internal `access_type` filtering rules.
+
+Files touched:
+	•	back/src/modules/routes/routes.schemas.ts
+	•	back/src/modules/routes/routes.service.ts
+	•	back/src/modules/routes/routes.repository.ts
+	•	back/src/swagger/openapi-spec.ts
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+	•	back/backend_db_structure.md
+
+⸻
+
 [2026-03-22 05:37] - Keep far-distance CSV places as low-confidence imports
 
 Type: fix

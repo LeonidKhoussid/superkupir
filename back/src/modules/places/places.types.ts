@@ -13,14 +13,44 @@ export interface PlaceRecommendationInput {
   seasonId?: number;
   seasonSlug?: string;
   anchorPlaceId?: number;
+  /** When set, only places with this `place_types.slug` are returned. */
+  typeSlug?: string;
   excludePlaceIds: number[];
   radiusKm?: number;
   limit: number;
 }
 
+/** Детерминированный подбор мест для `POST /routes/from-quiz` (без ML). */
+export interface QuizPlacesBuildInput {
+  seasonSlug: string;
+  perPersonBudgetMin: number;
+  perPersonBudgetMax: number;
+  typePreferenceOrder: string[];
+  limit: number;
+}
+
+/** Квиз: основные точки в одном `radius_group` + отель и еда там же. */
+export interface QuizClusteredBuildInput {
+  seasonSlug: string;
+  perPersonBudgetMin: number;
+  perPersonBudgetMax: number;
+  /** Типы достопримечательностей (без отелей/ресторанов). */
+  mainTypePreferenceOrder: string[];
+  mainLimit: number;
+  maxHotels: number;
+  maxRestaurants: number;
+}
+
+export interface QuizClusteredBuildResult {
+  mainIds: number[];
+  hotelIds: number[];
+  restaurantIds: number[];
+  /** Выбранный кластер (для отладки); пусто если без фильтра по району. */
+  clusterRadiusGroup: string | null;
+}
+
 export interface PlaceRecord {
   id: number;
-  externalId: string | null;
   name: string;
   sourceLocation: string | null;
   cardUrl: string | null;
@@ -43,7 +73,6 @@ export interface PlaceRecord {
 
 export interface PublicPlace {
   id: number;
-  external_id: string | null;
   name: string;
   source_location: string | null;
   card_url: string | null;
@@ -79,11 +108,12 @@ export interface PlaceRecommendationsResult {
   items: PlaceRecommendation[];
   total: number;
   limit: number;
+  /** True when anchor-based geo/radius filter returned no rows and a season+exclude-only fallback was used. */
+  recommendation_broad_fallback?: boolean;
 }
 
 export const toPublicPlace = (place: PlaceRecord): PublicPlace => ({
   id: place.id,
-  external_id: place.externalId,
   name: place.name,
   source_location: place.sourceLocation,
   card_url: place.cardUrl,

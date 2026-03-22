@@ -52,14 +52,7 @@ export class RoutesController {
 
   createFromQuiz = asyncHandler(async (request: Request, response: Response) => {
     const body = createRouteFromQuizSchema.parse(request.body);
-    const result = await this.routesService.createRouteFromQuiz(request.auth!.userId, {
-      title: body.title,
-      description: body.description,
-      seasonId: body.season_id,
-      seasonSlug: body.season_slug,
-      desiredPlaceCount: body.desired_place_count,
-      generatedPlaceIds: body.generated_place_ids,
-    });
+    const result = await this.routesService.createRouteFromQuiz(request.auth!.userId, body);
 
     response.status(201).json(result);
   });

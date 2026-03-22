@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS seasons (
 
 CREATE TABLE IF NOT EXISTS places (
   id BIGSERIAL PRIMARY KEY,
-  external_id TEXT UNIQUE,
+  import_key TEXT NOT NULL UNIQUE,
   type_id BIGINT NOT NULL REFERENCES place_types(id),
   name TEXT NOT NULL,
   description TEXT,
@@ -73,16 +73,46 @@ CREATE TABLE IF NOT EXISTS places (
 );
 
 ALTER TABLE IF EXISTS places
+  ADD COLUMN IF NOT EXISTS import_key TEXT,
   ADD COLUMN IF NOT EXISTS import_confidence TEXT,
   ADD COLUMN IF NOT EXISTS city_distance_km NUMERIC(10, 2);
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'places'
+      AND column_name = 'external_id'
+  ) THEN
+    UPDATE places
+    SET import_key = external_id
+    WHERE import_key IS NULL
+      AND external_id IS NOT NULL;
+  END IF;
+END $$;
+
+UPDATE places
+SET import_key = CONCAT('legacy:place:', id::text)
+WHERE import_key IS NULL;
 
 UPDATE places
 SET import_confidence = 'high'
 WHERE import_confidence IS NULL;
 
 ALTER TABLE IF EXISTS places
+  ALTER COLUMN import_key SET NOT NULL,
   ALTER COLUMN import_confidence SET DEFAULT 'high',
   ALTER COLUMN import_confidence SET NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS places_import_key_unique_idx ON places(import_key);
+
+ALTER TABLE IF EXISTS places
+  DROP CONSTRAINT IF EXISTS places_external_id_key;
+
+ALTER TABLE IF EXISTS places
+  DROP COLUMN IF EXISTS external_id;
 
 ALTER TABLE IF EXISTS places
   DROP CONSTRAINT IF EXISTS places_import_confidence_check;
@@ -95,6 +125,7 @@ CREATE INDEX IF NOT EXISTS places_type_id_idx ON places(type_id);
 CREATE INDEX IF NOT EXISTS places_source_location_idx ON places(source_location);
 CREATE INDEX IF NOT EXISTS places_radius_group_idx ON places(radius_group);
 CREATE INDEX IF NOT EXISTS places_lat_lon_idx ON places(latitude, longitude);
+CREATE INDEX IF NOT EXISTS places_is_active_id_idx ON places(is_active, id);
 
 CREATE TABLE IF NOT EXISTS place_seasons (
   id BIGSERIAL PRIMARY KEY,
@@ -286,7 +317,7 @@ BEGIN
   THEN
     INSERT INTO places (
       id,
-      external_id,
+      import_key,
       type_id,
       name,
       description,
@@ -305,7 +336,7 @@ BEGIN
     )
     SELECT
       wineries.id,
-      wineries.external_id,
+      CONCAT('legacy:wineries:', wineries.external_id),
       winery_type_id,
       wineries.name,
       wineries.description,
@@ -326,7 +357,7 @@ BEGIN
       TRUE
     FROM wineries
     ON CONFLICT (id) DO UPDATE SET
-      external_id = EXCLUDED.external_id,
+      import_key = EXCLUDED.import_key,
       type_id = EXCLUDED.type_id,
       name = EXCLUDED.name,
       description = EXCLUDED.description,

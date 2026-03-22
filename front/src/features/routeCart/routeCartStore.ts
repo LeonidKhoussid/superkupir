@@ -18,6 +18,8 @@ export type RouteCartState = {
   activeSeasonId: number | null
   builderStarted: boolean
   recommendationItems: PublicPlace[]
+  /** Сервер расширил выдачу без якорной близости (см. recommendation_broad_fallback). */
+  recommendationsBroadFallback: boolean
   recommendationsStatus: RecommendationsStatus
   recommendationsError: string | null
   routeCreateLoading: boolean
@@ -30,7 +32,8 @@ type RouteCartActions = {
   rejectSwipePlace: (id: number) => void
   resetBuilder: () => void
   setRecommendationsLoading: () => void
-  setRecommendationsResult: (items: PublicPlace[]) => void
+  setRecommendationsResult: (items: PublicPlace[], broadFallback?: boolean) => void
+  setRouteAnchor: (placeId: number) => void
   setRecommendationsError: (message: string) => void
   setActiveSeasonId: (id: number | null) => void
   setRouteCreateLoading: (v: boolean) => void
@@ -40,12 +43,14 @@ type RouteCartActions = {
 const initialVolatile = (): Pick<
   RouteCartState,
   | 'recommendationItems'
+  | 'recommendationsBroadFallback'
   | 'recommendationsStatus'
   | 'recommendationsError'
   | 'routeCreateLoading'
   | 'routeCreateError'
 > => ({
   recommendationItems: [],
+  recommendationsBroadFallback: false,
   recommendationsStatus: 'idle',
   recommendationsError: null,
   routeCreateLoading: false,
@@ -134,6 +139,7 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
             activeSeasonSlug: nextSlug,
             activeSeasonId: nextSlug === s.activeSeasonSlug ? s.activeSeasonId : null,
             recommendationItems: [],
+            recommendationsBroadFallback: false,
             recommendationsStatus: 'idle',
             recommendationsError: null,
           }
@@ -157,18 +163,40 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
         set({
           recommendationsStatus: 'loading',
           recommendationsError: null,
+          recommendationsBroadFallback: false,
         }),
 
-      setRecommendationsResult: (items) =>
+      setRecommendationsResult: (items, broadFallback) =>
         set({
           recommendationItems: items,
+          recommendationsBroadFallback: Boolean(broadFallback),
           recommendationsStatus: items.length === 0 ? 'empty' : 'ok',
           recommendationsError: null,
+        }),
+
+      setRouteAnchor: (placeId) =>
+        set((s) => {
+          if (!s.selectedIds.includes(placeId)) return s
+          const key = String(placeId)
+          const anchorPlace = s.placesById[key]
+          const slugFromAnchor =
+            anchorPlace &&
+            Array.isArray(anchorPlace.season_slugs) &&
+            anchorPlace.season_slugs.length > 0
+              ? anchorPlace.season_slugs[0] ?? null
+              : null
+          const nextSlug = slugFromAnchor ?? s.activeSeasonSlug
+          return {
+            anchorPlaceId: placeId,
+            activeSeasonSlug: nextSlug,
+            activeSeasonId: nextSlug === s.activeSeasonSlug ? s.activeSeasonId : null,
+          }
         }),
 
       setRecommendationsError: (message) =>
         set({
           recommendationItems: [],
+          recommendationsBroadFallback: false,
           recommendationsStatus: 'error',
           recommendationsError: message,
         }),
@@ -194,6 +222,7 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
       onRehydrateStorage: () => () => {
         useRouteCartStore.setState({
           recommendationItems: [],
+          recommendationsBroadFallback: false,
           recommendationsStatus: 'idle',
           recommendationsError: null,
           routeCreateLoading: false,

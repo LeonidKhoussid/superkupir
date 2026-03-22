@@ -34,7 +34,7 @@ export type QuizStepConfig =
       answerKey: 'peopleCount' | 'daysCount'
     })
   | (StepCommon & {
-      kind: 'seasons'
+      kind: 'season'
       options: readonly { slug: SeasonSlug; label: string }[]
     })
   | (StepCommon & {
@@ -72,7 +72,7 @@ export const quizSteps: QuizStepConfig[] = [
   },
   {
     id: 2,
-    kind: 'seasons',
+    kind: 'season',
     ...quizIllustrationBlock,
     helper: 'давай подберем тебе маршрут!',
     helperPlacement: 'center',

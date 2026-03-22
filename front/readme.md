@@ -2,6 +2,10 @@
 
 Vite + React + TypeScript + Tailwind CSS. Только UI и клиентский флоу квиза, без бэкенда.
 
+## Переменные окружения (фрагмент)
+
+- **`/routes/:id/panorama`**: карта и Street View встраиваются **iframe** с публичными URL Google Maps — **отдельный ключ API в `.env` не нужен**.
+
 ## Запуск
 
 ```bash

@@ -5,11 +5,13 @@ import type {
   ListPlacesInput,
   PlaceRecommendationInput,
   PlaceRecord,
+  QuizClusteredBuildInput,
+  QuizClusteredBuildResult,
+  QuizPlacesBuildInput,
 } from "./places.types";
 
 interface PlaceRow extends QueryResultRow {
   id: number;
-  external_id: string | null;
   name: string;
   source_location: string | null;
   card_url: string | null;
@@ -62,7 +64,6 @@ const normalizeNumeric = (value: string | number | null | undefined): number | n
 
 const mapPlace = (row: PlaceRow): PlaceRecord => ({
   id: row.id,
-  externalId: row.external_id,
   name: row.name,
   sourceLocation: row.source_location,
   cardUrl: row.card_url,
@@ -83,24 +84,65 @@ const mapPlace = (row: PlaceRow): PlaceRecord => ({
   isActive: row.is_active,
 });
 
-const recommendationDistanceSql = `
+/** `coordinates_raw` вида "lat,lon" — подставляем, если `latitude`/`longitude` в БД пустые. */
+const COORD_RAW_TILDE_PATTERN =
+  "^[[:space:]]*-?[0-9]+(\\.[0-9]+)?[[:space:]]*,[[:space:]]*-?[0-9]+(\\.[0-9]+)?[[:space:]]*$";
+
+const effectiveLatExpr = (alias: string): string => `
+COALESCE(
+  ${alias}.latitude,
   CASE
-    WHEN anchor.latitude IS NOT NULL
-      AND anchor.longitude IS NOT NULL
-      AND places.latitude IS NOT NULL
-      AND places.longitude IS NOT NULL
-    THEN SQRT(
-      POWER((places.latitude - anchor.latitude) * 111.0, 2) +
-      POWER((places.longitude - anchor.longitude) * 85.0, 2)
-    )
+    WHEN ${alias}.coordinates_raw IS NOT NULL
+      AND ${alias}.coordinates_raw ~ '${COORD_RAW_TILDE_PATTERN}'
+    THEN NULLIF(TRIM(SPLIT_PART(${alias}.coordinates_raw, ',', 1)), '')::double precision
     ELSE NULL
   END
+)`;
+
+const effectiveLonExpr = (alias: string): string => `
+COALESCE(
+  ${alias}.longitude,
+  CASE
+    WHEN ${alias}.coordinates_raw IS NOT NULL
+      AND ${alias}.coordinates_raw ~ '${COORD_RAW_TILDE_PATTERN}'
+    THEN NULLIF(TRIM(SPLIT_PART(${alias}.coordinates_raw, ',', 2)), '')::double precision
+    ELSE NULL
+  END
+)`;
+
+/** Расстояние до якоря (км), если у якоря и кандидата есть эффективные координаты. */
+const buildRecommendationDistanceSql = (): string => {
+  const plat = effectiveLatExpr("places");
+  const plon = effectiveLonExpr("places");
+  return `
+CASE
+  WHEN anchor.eff_lat IS NOT NULL
+    AND anchor.eff_lon IS NOT NULL
+    AND (${plat}) IS NOT NULL
+    AND (${plon}) IS NOT NULL
+  THEN SQRT(
+    POWER(((${plat}) - anchor.eff_lat) * 111.0, 2) +
+    POWER(((${plon}) - anchor.eff_lon) * 85.0, 2)
+  )
+  ELSE NULL
+END
+`;
+};
+
+const nullAnchorJoinSql = `
+  CROSS JOIN (
+    SELECT
+      NULL::bigint AS id,
+      NULL::double precision AS eff_lat,
+      NULL::double precision AS eff_lon,
+      NULL::text AS source_location,
+      NULL::text AS radius_group
+  ) AS anchor
 `;
 
 const baseSelect = `
   SELECT
     places.id,
-    places.external_id,
     places.name,
     places.source_location,
     places.card_url,
@@ -129,6 +171,49 @@ const baseSelect = `
     places.is_active
   FROM places
   INNER JOIN place_types ON place_types.id = places.type_id
+`;
+
+const pageSelect = `
+  SELECT places.id
+  FROM places
+  INNER JOIN place_types ON place_types.id = places.type_id
+`;
+
+const placeDetailsByIdsSelect = `
+  WITH season_map AS (
+    SELECT
+      place_seasons.place_id,
+      ARRAY_AGG(seasons.slug ORDER BY seasons.slug) AS season_slugs
+    FROM place_seasons
+    INNER JOIN seasons ON seasons.id = place_seasons.season_id
+    WHERE place_seasons.place_id = ANY($1::bigint[])
+    GROUP BY place_seasons.place_id
+  )
+  SELECT
+    places.id,
+    places.name,
+    places.source_location,
+    places.card_url,
+    places.logo_url,
+    places.size,
+    places.description,
+    places.short_description,
+    places.photo_urls,
+    places.latitude,
+    places.longitude,
+    places.coordinates_raw,
+    places.address,
+    place_types.slug AS type_slug,
+    COALESCE(season_map.season_slugs, ARRAY[]::text[]) AS season_slugs,
+    places.estimated_cost,
+    places.estimated_duration_minutes,
+    places.radius_group,
+    places.is_active
+  FROM places
+  INNER JOIN place_types ON place_types.id = places.type_id
+  LEFT JOIN season_map ON season_map.place_id = places.id
+  WHERE places.id = ANY($1::bigint[])
+  ORDER BY places.id ASC
 `;
 
 const buildWhereClause = (filters: ListPlacesInput, values: unknown[]) => {
@@ -204,15 +289,26 @@ export class PlacesRepository {
     listValues.push(filters.offset);
     paginationSql += ` OFFSET $${listValues.length}`;
 
-    const result = await pool.query<PlaceRow>(
+    const pageIdResult = await pool.query<{ id: number }>(
       `
-        ${baseSelect}
+        ${pageSelect}
         ${whereSql}
         ORDER BY places.id ASC
         ${paginationSql}
       `,
       listValues,
     );
+
+    const pageIds = pageIdResult.rows.map((row) => row.id);
+
+    if (pageIds.length === 0) {
+      return {
+        items: [],
+        total: totalResult.rows[0]?.total ?? 0,
+      };
+    }
+
+    const result = await pool.query<PlaceRow>(placeDetailsByIdsSelect, [pageIds]);
 
     return {
       items: result.rows.map(mapPlace),
@@ -269,13 +365,7 @@ export class PlacesRepository {
       return [];
     }
 
-    const result = await pool.query<PlaceRow>(
-      `
-        ${baseSelect}
-        WHERE places.id = ANY($1::bigint[])
-      `,
-      [ids],
-    );
+    const result = await pool.query<PlaceRow>(placeDetailsByIdsSelect, [ids]);
 
     const placeById = new Map(result.rows.map((row) => [row.id, mapPlace(row)]));
 
@@ -286,99 +376,105 @@ export class PlacesRepository {
 
   async findRecommendations(
     input: PlaceRecommendationInput,
-  ): Promise<{ items: Array<PlaceRecord & { distanceKm: number | null }>; total: number }> {
-    const values: unknown[] = [];
-    const conditions: string[] = ["places.is_active = TRUE"];
+  ): Promise<{
+    items: Array<PlaceRecord & { distanceKm: number | null }>;
+    total: number;
+    broadFallback: boolean;
+  }> {
+    const distanceSql = buildRecommendationDistanceSql();
 
-    if (input.seasonId !== undefined) {
-      values.push(input.seasonId);
-      conditions.push(
-        `EXISTS (
+    const buildSeasonExcludeSql = (
+      nextParamIndex: number,
+    ): { sqlParts: string[]; values: unknown[]; nextIndex: number } => {
+      const parts: string[] = [];
+      const vals: unknown[] = [];
+      let i = nextParamIndex;
+
+      if (input.seasonId !== undefined) {
+        vals.push(input.seasonId);
+        parts.push(
+          `EXISTS (
           SELECT 1
           FROM place_seasons
           WHERE place_seasons.place_id = places.id
-            AND place_seasons.season_id = $${values.length}
+            AND place_seasons.season_id = $${i}
         )`,
-      );
-    } else if (input.seasonSlug) {
-      values.push(input.seasonSlug);
-      conditions.push(
-        `EXISTS (
+        );
+        i += 1;
+      } else if (input.seasonSlug) {
+        vals.push(input.seasonSlug);
+        parts.push(
+          `EXISTS (
           SELECT 1
           FROM place_seasons
           INNER JOIN seasons ON seasons.id = place_seasons.season_id
           WHERE place_seasons.place_id = places.id
-            AND seasons.slug = $${values.length}
+            AND seasons.slug = $${i}
         )`,
-      );
-    }
+        );
+        i += 1;
+      }
 
-    if (input.excludePlaceIds.length > 0) {
-      values.push(input.excludePlaceIds);
-      conditions.push(`places.id <> ALL($${values.length}::bigint[])`);
-    }
+      if (input.excludePlaceIds.length > 0) {
+        vals.push(input.excludePlaceIds);
+        parts.push(`places.id <> ALL($${i}::bigint[])`);
+        i += 1;
+      }
 
-    let anchorJoinSql = `
-      CROSS JOIN (
-        SELECT
-          NULL::bigint AS id,
-          NULL::double precision AS latitude,
-          NULL::double precision AS longitude,
-          NULL::text AS source_location,
-          NULL::text AS radius_group
-      ) AS anchor
-    `;
+      return { sqlParts: parts, values: vals, nextIndex: i };
+    };
 
-    if (input.anchorPlaceId !== undefined) {
-      values.push(input.anchorPlaceId);
-      const anchorIndex = values.length;
-      anchorJoinSql = `
-        INNER JOIN (
-          SELECT id, latitude, longitude, source_location, radius_group
-          FROM places
-          WHERE id = $${anchorIndex}
-        ) AS anchor ON TRUE
-      `;
-      conditions.push(`places.id <> anchor.id`);
+    const appendTypeSlugFilter = (whereParts: string[], values: unknown[]): void => {
+      const slug = input.typeSlug?.trim();
+      if (!slug) {
+        return;
+      }
+      values.push(slug);
+      whereParts.push(`place_types.slug = $${values.length}`);
+    };
 
-      values.push(input.radiusKm ?? 50);
-      const radiusIndex = values.length;
-      conditions.push(
+    const runAnchoredQuery = async (): Promise<{ rows: PlaceRow[]; total: number }> => {
+      const anchorId = input.anchorPlaceId as number;
+      const radiusKm = input.radiusKm ?? 50;
+
+      const values: unknown[] = [anchorId];
+      const seasonBlock = buildSeasonExcludeSql(2);
+      values.push(...seasonBlock.values);
+      values.push(radiusKm);
+      const radiusParam = seasonBlock.nextIndex;
+
+      const whereParts = [
+        "places.is_active = TRUE",
+        ...seasonBlock.sqlParts,
+        "places.id <> anchor.id",
         `(
           (anchor.radius_group IS NOT NULL AND places.radius_group = anchor.radius_group)
           OR (anchor.source_location IS NOT NULL AND places.source_location = anchor.source_location)
           OR (
-            anchor.latitude IS NOT NULL
-            AND anchor.longitude IS NOT NULL
-            AND places.latitude IS NOT NULL
-            AND places.longitude IS NOT NULL
-            AND ${recommendationDistanceSql} <= $${radiusIndex}
+            anchor.eff_lat IS NOT NULL
+            AND anchor.eff_lon IS NOT NULL
+            AND (${effectiveLatExpr("places")}) IS NOT NULL
+            AND (${effectiveLonExpr("places")}) IS NOT NULL
+            AND (${distanceSql}) <= $${radiusParam}
           )
         )`,
-      );
-    }
+      ];
+      appendTypeSlugFilter(whereParts, values);
+      const whereSql = `WHERE ${whereParts.join(" AND ")}`;
 
-    const whereSql = `WHERE ${conditions.join(" AND ")}`;
-
-    const totalResult = await pool.query<TotalRow>(
-      `
-        SELECT COUNT(*)::int AS total
-        FROM places
-        INNER JOIN place_types ON place_types.id = places.type_id
-        ${anchorJoinSql}
-        ${whereSql}
-      `,
-      values,
-    );
-
-    values.push(input.limit);
-    const limitIndex = values.length;
-
-    const result = await pool.query<PlaceRow>(
-      `
+      const fromSql = `
+        WITH anchor AS (
+          SELECT
+            p.id,
+            p.source_location,
+            p.radius_group,
+            (${effectiveLatExpr("p")}) AS eff_lat,
+            (${effectiveLonExpr("p")}) AS eff_lon
+          FROM places p
+          WHERE p.id = $1
+        )
         SELECT
           places.id,
-          places.external_id,
           places.name,
           places.source_location,
           places.card_url,
@@ -405,25 +501,357 @@ export class PlacesRepository {
           places.estimated_duration_minutes,
           places.radius_group,
           places.is_active,
-          ${recommendationDistanceSql} AS distance_km
+          ${distanceSql} AS distance_km
         FROM places
         INNER JOIN place_types ON place_types.id = places.type_id
-        ${anchorJoinSql}
+        CROSS JOIN anchor
+      `;
+
+      const totalResult = await pool.query<TotalRow>(
+        `
+        WITH anchor AS (
+          SELECT
+            p.id,
+            p.source_location,
+            p.radius_group,
+            (${effectiveLatExpr("p")}) AS eff_lat,
+            (${effectiveLonExpr("p")}) AS eff_lon
+          FROM places p
+          WHERE p.id = $1
+        )
+        SELECT COUNT(*)::int AS total
+        FROM places
+        INNER JOIN place_types ON place_types.id = places.type_id
+        CROSS JOIN anchor
+        ${whereSql}
+      `,
+        values,
+      );
+
+      values.push(input.limit);
+      const limitIndex = values.length;
+
+      const result = await pool.query<PlaceRow>(
+        `
+        ${fromSql}
         ${whereSql}
         ORDER BY
-          ${recommendationDistanceSql} ASC NULLS LAST,
+          ${distanceSql} ASC NULLS LAST,
+          (places.radius_group IS NOT DISTINCT FROM anchor.radius_group) DESC,
           places.id ASC
         LIMIT $${limitIndex}
       `,
-      values,
-    );
+        values,
+      );
+
+      return { rows: result.rows, total: totalResult.rows[0]?.total ?? 0 };
+    };
+
+    const runSeasonOnlyQuery = async (): Promise<{ rows: PlaceRow[]; total: number }> => {
+      const values: unknown[] = [];
+      const seasonBlock = buildSeasonExcludeSql(1);
+      values.push(...seasonBlock.values);
+
+      const whereParts = ["places.is_active = TRUE", ...seasonBlock.sqlParts];
+      appendTypeSlugFilter(whereParts, values);
+      const whereSql = `WHERE ${whereParts.join(" AND ")}`;
+
+      const totalResult = await pool.query<TotalRow>(
+        `
+        SELECT COUNT(*)::int AS total
+        FROM places
+        INNER JOIN place_types ON place_types.id = places.type_id
+        ${nullAnchorJoinSql}
+        ${whereSql}
+      `,
+        values,
+      );
+
+      values.push(input.limit);
+      const limitIndex = values.length;
+
+      const result = await pool.query<PlaceRow>(
+        `
+        SELECT
+          places.id,
+          places.name,
+          places.source_location,
+          places.card_url,
+          places.logo_url,
+          places.size,
+          places.description,
+          places.short_description,
+          places.photo_urls,
+          places.latitude,
+          places.longitude,
+          places.coordinates_raw,
+          places.address,
+          place_types.slug AS type_slug,
+          COALESCE(
+            (
+              SELECT ARRAY_AGG(seasons.slug ORDER BY seasons.slug)
+              FROM place_seasons
+              INNER JOIN seasons ON seasons.id = place_seasons.season_id
+              WHERE place_seasons.place_id = places.id
+            ),
+            ARRAY[]::text[]
+          ) AS season_slugs,
+          places.estimated_cost,
+          places.estimated_duration_minutes,
+          places.radius_group,
+          places.is_active,
+          ${distanceSql} AS distance_km
+        FROM places
+        INNER JOIN place_types ON place_types.id = places.type_id
+        ${nullAnchorJoinSql}
+        ${whereSql}
+        ORDER BY
+          ${distanceSql} ASC NULLS LAST,
+          (places.radius_group IS NOT DISTINCT FROM anchor.radius_group) DESC,
+          places.id ASC
+        LIMIT $${limitIndex}
+      `,
+        values,
+      );
+
+      return { rows: result.rows, total: totalResult.rows[0]?.total ?? 0 };
+    };
+
+    if (input.anchorPlaceId === undefined) {
+      const { rows, total } = await runSeasonOnlyQuery();
+      return {
+        items: rows.map((row) => ({
+          ...mapPlace(row),
+          distanceKm: normalizeNumeric(row.distance_km),
+        })),
+        total,
+        broadFallback: false,
+      };
+    }
+
+    let { rows, total } = await runAnchoredQuery();
+    let broadFallback = false;
+
+    if (rows.length === 0) {
+      broadFallback = true;
+      const fb = await runSeasonOnlyQuery();
+      rows = fb.rows;
+      total = fb.total;
+    }
 
     return {
-      items: result.rows.map((row) => ({
+      items: rows.map((row) => ({
         ...mapPlace(row),
         distanceKm: normalizeNumeric(row.distance_km),
       })),
-      total: totalResult.rows[0]?.total ?? 0,
+      total,
+      broadFallback,
+    };
+  }
+
+  /**
+   * Кандидаты для квиз-маршрута: сезон, бюджет «на человека», приоритет типов мест.
+   * Сортировка: сначала типы из `typePreferenceOrder` (порядок в массиве), затем `places.id`.
+   */
+  async findPlacesForQuizBuild(input: QuizPlacesBuildInput): Promise<number[]> {
+    const lim = Math.min(Math.max(input.limit, 1), 50);
+    const min = Number.isFinite(input.perPersonBudgetMin) ? input.perPersonBudgetMin : 0;
+    const maxRaw = Number.isFinite(input.perPersonBudgetMax) ? input.perPersonBudgetMax : min;
+    const max = maxRaw >= min ? maxRaw : min;
+    const prefs = [...new Set(input.typePreferenceOrder.filter((s) => typeof s === "string" && s.trim() !== ""))];
+
+    const result = await pool.query<{ id: number }>(
+      `
+        SELECT places.id
+        FROM places
+        INNER JOIN place_types ON place_types.id = places.type_id
+        WHERE places.is_active = TRUE
+          AND EXISTS (
+            SELECT 1
+            FROM place_seasons
+            INNER JOIN seasons ON seasons.id = place_seasons.season_id
+            WHERE place_seasons.place_id = places.id
+              AND seasons.slug = $1
+          )
+          AND (
+            places.estimated_cost IS NULL
+            OR (places.estimated_cost >= $2 AND places.estimated_cost <= $3)
+          )
+        ORDER BY
+          COALESCE(array_position($4::text[], place_types.slug), 1000),
+          places.id ASC
+        LIMIT $5
+      `,
+      [input.seasonSlug, min, max, prefs, lim],
+    );
+
+    return result.rows.map((row) => row.id);
+  }
+
+  /**
+   * Квиз-маршрут: самый частый `radius_group` среди мест сезона+бюджета → основные точки
+   * (без отелей/ресторанов) + отель + гастро/ресторан в том же районе.
+   */
+  async findPlacesForQuizClustered(input: QuizClusteredBuildInput): Promise<QuizClusteredBuildResult> {
+    const min = Number.isFinite(input.perPersonBudgetMin) ? input.perPersonBudgetMin : 0;
+    const maxRaw = Number.isFinite(input.perPersonBudgetMax) ? input.perPersonBudgetMax : min;
+    const max = maxRaw >= min ? maxRaw : min;
+    const mainLim = Math.min(Math.max(input.mainLimit, 1), 40);
+    const prefs = [
+      ...new Set(input.mainTypePreferenceOrder.filter((s) => typeof s === "string" && s.trim() !== "")),
+    ];
+    const maxHotels = Math.min(Math.max(input.maxHotels, 0), 3);
+    const maxRestaurants = Math.min(Math.max(input.maxRestaurants, 0), 4);
+
+    const seasonExistsSql = `
+      EXISTS (
+        SELECT 1
+        FROM place_seasons
+        INNER JOIN seasons ON seasons.id = place_seasons.season_id
+        WHERE place_seasons.place_id = places.id
+          AND seasons.slug = $1
+      )`;
+
+    const budgetSql = `
+      (
+        places.estimated_cost IS NULL
+        OR (places.estimated_cost >= $2 AND places.estimated_cost <= $3)
+      )`;
+
+    const notHospitalitySql = `
+      place_types.slug NOT IN ('hotel', 'guest_house', 'recreation_base', 'restaurant', 'gastro')`;
+
+    const dominantResult = await pool.query<{ rg: string }>(
+      `
+        SELECT places.radius_group AS rg
+        FROM places
+        INNER JOIN place_types ON place_types.id = places.type_id
+        WHERE places.is_active = TRUE
+          AND ${seasonExistsSql}
+          AND ${budgetSql}
+          AND ${notHospitalitySql}
+          AND places.radius_group IS NOT NULL
+          AND TRIM(places.radius_group) <> ''
+        GROUP BY places.radius_group
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+      `,
+      [input.seasonSlug, min, max],
+    );
+
+    const clusterRg = dominantResult.rows[0]?.rg?.trim() ?? null;
+
+    const runMain = async (radiusFilter: string | null): Promise<number[]> => {
+      const values: unknown[] = [input.seasonSlug, min, max, prefs, mainLim];
+      let rgClause = "";
+      if (radiusFilter != null && radiusFilter !== "") {
+        values.push(radiusFilter);
+        rgClause = `AND places.radius_group = $${values.length}`;
+      }
+
+      const res = await pool.query<{ id: number }>(
+        `
+          SELECT places.id
+          FROM places
+          INNER JOIN place_types ON place_types.id = places.type_id
+          WHERE places.is_active = TRUE
+            AND ${seasonExistsSql}
+            AND ${budgetSql}
+            AND ${notHospitalitySql}
+            ${rgClause}
+          ORDER BY
+            COALESCE(array_position($4::text[], place_types.slug), 1000),
+            places.id ASC
+          LIMIT $5
+        `,
+        values,
+      );
+      return res.rows.map((r) => r.id);
+    };
+
+    let mainIds = await runMain(clusterRg);
+    if (mainIds.length < 2 && clusterRg != null) {
+      mainIds = await runMain(null);
+    }
+
+    /** Отель/ночёвка редко попадает в «бюджет на человека за день» как винодельня — не режем по per-person диапазону. */
+    const hospBudgetSql = `
+      (
+        places.estimated_cost IS NULL
+        OR (places.estimated_cost >= $2 AND places.estimated_cost <= $3)
+      )`;
+    const hospBudgetParams: [string, number, number] = [input.seasonSlug, 0, 999_999_999];
+
+    const pickHotels = async (radiusFilter: string | null, exclude: number[]): Promise<number[]> => {
+      if (maxHotels === 0) {
+        return [];
+      }
+      const values: unknown[] = [...hospBudgetParams];
+      let sql = `
+        SELECT places.id
+        FROM places
+        INNER JOIN place_types ON place_types.id = places.type_id
+        WHERE places.is_active = TRUE
+          AND ${seasonExistsSql}
+          AND ${hospBudgetSql}
+          AND place_types.slug IN ('hotel', 'guest_house', 'recreation_base')`;
+      if (radiusFilter != null && radiusFilter !== "") {
+        values.push(radiusFilter);
+        sql += `\n          AND places.radius_group = $${values.length}`;
+      }
+      if (exclude.length > 0) {
+        values.push(exclude);
+        sql += `\n          AND places.id <> ALL($${values.length}::bigint[])`;
+      }
+      values.push(maxHotels);
+      sql += `\n        ORDER BY places.id ASC\n        LIMIT $${values.length}`;
+      const res = await pool.query<{ id: number }>(sql, values);
+      return res.rows.map((r) => r.id);
+    };
+
+    const pickRestaurants = async (radiusFilter: string | null, exclude: number[]): Promise<number[]> => {
+      if (maxRestaurants === 0) {
+        return [];
+      }
+      const values: unknown[] = [...hospBudgetParams];
+      let sql = `
+        SELECT places.id
+        FROM places
+        INNER JOIN place_types ON place_types.id = places.type_id
+        WHERE places.is_active = TRUE
+          AND ${seasonExistsSql}
+          AND ${hospBudgetSql}
+          AND place_types.slug IN ('restaurant', 'gastro')`;
+      if (radiusFilter != null && radiusFilter !== "") {
+        values.push(radiusFilter);
+        sql += `\n          AND places.radius_group = $${values.length}`;
+      }
+      if (exclude.length > 0) {
+        values.push(exclude);
+        sql += `\n          AND places.id <> ALL($${values.length}::bigint[])`;
+      }
+      values.push(maxRestaurants);
+      sql += `\n        ORDER BY places.id ASC\n        LIMIT $${values.length}`;
+      const res = await pool.query<{ id: number }>(sql, values);
+      return res.rows.map((r) => r.id);
+    };
+
+    let hotelIds = await pickHotels(clusterRg, mainIds);
+    if (hotelIds.length === 0 && clusterRg != null) {
+      hotelIds = await pickHotels(null, mainIds);
+    }
+
+    const excludeForFood = [...mainIds, ...hotelIds];
+    let restaurantIds = await pickRestaurants(clusterRg, excludeForFood);
+    if (restaurantIds.length === 0 && clusterRg != null) {
+      restaurantIds = await pickRestaurants(null, excludeForFood);
+    }
+
+    return {
+      mainIds,
+      hotelIds,
+      restaurantIds,
+      clusterRadiusGroup: clusterRg,
     };
   }
 }

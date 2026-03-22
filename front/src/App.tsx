@@ -3,10 +3,13 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from './features/auth/authStore'
 import { QuizPage } from './features/quiz/QuizPage'
 import { LandingPage } from './pages/LandingPage'
+import { MyRoutesPage } from './pages/MyRoutesPage'
 import { PlaceDetailPage } from './pages/PlaceDetailPage'
 import { PlacesCatalogPage } from './pages/PlacesCatalogPage'
 import { QuizDonePage } from './pages/QuizDonePage'
 import { RouteDetailPage } from './pages/RouteDetailPage'
+import { RoutePanoramaPage } from './pages/RoutePanoramaPage'
+import { RouteSharedPage } from './pages/RouteSharedPage'
 
 function AuthSessionBootstrap() {
   const hydrateSession = useAuthStore((state) => state.hydrateSession)
@@ -28,8 +31,11 @@ export default function App() {
       <AuthSessionBootstrap />
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/myroutes" element={<MyRoutesPage />} />
         <Route path="/places" element={<PlacesCatalogPage />} />
         <Route path="/places/:id" element={<PlaceDetailPage />} />
+        <Route path="/routes/shared/:token" element={<RouteSharedPage />} />
+        <Route path="/routes/:id/panorama" element={<RoutePanoramaPage />} />
         <Route path="/routes/:id" element={<RouteDetailPage />} />
         <Route path="/quiz/:stepId" element={<QuizPage />} />
         <Route path="/quiz/done" element={<QuizDonePage />} />

@@ -151,7 +151,6 @@ export const openApiSpec = {
         type: "object",
         properties: {
           id: { type: "integer" },
-          external_id: { type: "string", nullable: true },
           name: { type: "string" },
           source_location: { type: "string", nullable: true },
           card_url: { type: "string", nullable: true },
@@ -204,6 +203,13 @@ export const openApiSpec = {
           season_id: { type: "integer", minimum: 1, nullable: true },
           season_slug: { type: "string", minLength: 1, maxLength: 255, nullable: true },
           anchor_place_id: { type: "integer", minimum: 1, nullable: true },
+          type_slug: {
+            type: "string",
+            minLength: 1,
+            maxLength: 64,
+            nullable: true,
+            description: "When set, restrict recommendations to this place type slug (place_types.slug).",
+          },
           exclude_place_ids: {
             type: "array",
             items: { type: "integer", minimum: 1 },
@@ -223,6 +229,11 @@ export const openApiSpec = {
           },
           total: { type: "integer" },
           limit: { type: "integer" },
+          recommendation_broad_fallback: {
+            type: "boolean",
+            description:
+              "When true, anchor proximity filters matched no candidates and results are a broader season+exclude catalog slice (distance_km may be null).",
+          },
         },
         required: ["items", "total", "limit"],
       },
@@ -517,7 +528,25 @@ export const openApiSpec = {
       },
       CreateRouteFromQuizBody: {
         type: "object",
+        description:
+          "Создание маршрута из квиза. Основной контракт: people_count, season, budget_from, budget_to, excursion_type, days_count. Legacy: quiz_answers (и опционально season_slug / desired_place_count).",
         properties: {
+          people_count: { type: "integer", minimum: 1, maximum: 50 },
+          season: {
+            type: "string",
+            minLength: 1,
+            maxLength: 80,
+            description: "spring | summer | autumn | winter | fall (fall нормализуется в autumn)",
+          },
+          budget_from: { type: "number", minimum: 0 },
+          budget_to: { type: "number", minimum: 0 },
+          excursion_type: {
+            type: "string",
+            minLength: 1,
+            maxLength: 40,
+            description: "активный | умеренный | спокойный (регистр не важен)",
+          },
+          days_count: { type: "integer", minimum: 1, maximum: 30 },
           title: { type: "string", minLength: 1, maxLength: 200 },
           description: { type: "string", minLength: 1, maxLength: 4000, nullable: true },
           season_id: { type: "integer", minimum: 1, nullable: true },
@@ -526,6 +555,7 @@ export const openApiSpec = {
           quiz_answers: {
             type: "object",
             additionalProperties: true,
+            description: "Legacy-поле; для нового квиза не требуется",
           },
           generated_place_ids: {
             type: "array",
@@ -533,7 +563,6 @@ export const openApiSpec = {
             maxItems: 50,
           },
         },
-        required: ["quiz_answers"],
       },
       PublicRouteBuildSession: {
         type: "object",
@@ -949,9 +978,20 @@ export const openApiSpec = {
     "/routes": {
       get: {
         tags: ["Routes"],
-        summary: "List routes owned by or shared with the current user",
+        summary: "List routes for the current user",
         security: [{ bearerAuth: [] }],
         parameters: [
+          {
+            name: "scope",
+            in: "query",
+            description:
+              "Use `owned` to return only routes created by the current user. Default `accessible` keeps owned + shared access behavior.",
+            schema: {
+              type: "string",
+              enum: ["accessible", "owned"],
+              default: "accessible",
+            },
+          },
           { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } },
           { name: "offset", in: "query", schema: { type: "integer", minimum: 0, default: 0 } },
         ],
@@ -1006,6 +1046,8 @@ export const openApiSpec = {
       post: {
         tags: ["Routes"],
         summary: "Attach a shared route to the authenticated user's route list",
+        description:
+          "Creates or updates `route_access` for the current user on the same `routes` row as the share link. When the share allows editing (`can_edit=true`), access is `collaborator` so the user can call `/routes/{id}` mutations with the same optimistic `revision_number` rules as the owner. View-only shares attach as `viewer`.",
         security: [{ bearerAuth: [] }],
         parameters: [tokenPathParameter],
         responses: {
@@ -1019,6 +1061,8 @@ export const openApiSpec = {
       get: {
         tags: ["Routes"],
         summary: "Get route detail",
+        description:
+          "Returns route detail for the owner or any user present in `route_access` (collaborator/viewer). Collaborators may edit via PATCH and `/routes/{id}/places` endpoints; all writes use `revision_number` and return 409 on stale revisions.",
         security: [{ bearerAuth: [] }],
         parameters: [idPathParameter("id", "Route id")],
         responses: {
@@ -1030,6 +1074,8 @@ export const openApiSpec = {
       patch: {
         tags: ["Routes"],
         summary: "Update route metadata with optimistic concurrency control",
+        description:
+          "Allowed for route owner and users with collaborator (or legacy shared-edit) access. Not allowed for viewers. Requires current `revision_number`; responds with 409 when the route changed since load.",
         security: [{ bearerAuth: [] }],
         parameters: [idPathParameter("id", "Route id")],
         requestBody: {
@@ -1066,6 +1112,8 @@ export const openApiSpec = {
       post: {
         tags: ["Routes"],
         summary: "Add a place to a route",
+        description:
+          "Same authorization as route metadata updates: owner or collaborator with edit access. Bumps route `revision_number` when successful; 409 on revision mismatch.",
         security: [{ bearerAuth: [] }],
         parameters: [idPathParameter("id", "Route id")],
         requestBody: {
@@ -1126,6 +1174,8 @@ export const openApiSpec = {
       post: {
         tags: ["Routes"],
         summary: "Create an editable or read-only share link for a route",
+        description:
+          "Requires edit access on the route (owner or collaborator). `can_edit` on the link controls whether recipients get collaborator vs viewer access when they call `POST /routes/shared/{token}/access`. Response includes `token` for building a frontend URL `/routes/shared/{token}`.",
         security: [{ bearerAuth: [] }],
         parameters: [idPathParameter("id", "Route id")],
         requestBody: {

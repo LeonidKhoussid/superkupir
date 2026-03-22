@@ -9,13 +9,14 @@ export type QuizRestType = 'Активный' | 'Умеренный' | 'Спок
 
 export type QuizState = {
   peopleCount: number | null
-  seasons: SeasonSlug[]
+  /** Один выбранный сезон (карта / квиз). */
+  season: SeasonSlug | null
   budget: QuizBudget
   restType: QuizRestType | null
   daysCount: number | null
 
   setPeopleCount: (value: number | null) => void
-  toggleSeason: (slug: SeasonSlug) => void
+  setSeason: (slug: SeasonSlug | null) => void
   setBudgetFrom: (value: number) => void
   setBudgetTo: (value: number) => void
   setRestType: (value: QuizRestType) => void
@@ -31,20 +32,14 @@ function clamp(n: number, min: number, max: number) {
 
 export const useQuizStore = create<QuizState>((set) => ({
   peopleCount: null,
-  seasons: [],
+  season: null,
   budget: { ...BUDGET_INITIAL },
   restType: null,
   daysCount: null,
 
   setPeopleCount: (value) => set({ peopleCount: value }),
 
-  toggleSeason: (slug) =>
-    set((s) => {
-      const has = s.seasons.includes(slug)
-      return {
-        seasons: has ? s.seasons.filter((x) => x !== slug) : [...s.seasons, slug],
-      }
-    }),
+  setSeason: (slug) => set({ season: slug }),
 
   setBudgetFrom: (value) =>
     set((s) => {
@@ -71,12 +66,20 @@ export const useQuizStore = create<QuizState>((set) => ({
   reset: () =>
     set({
       peopleCount: null,
-      seasons: [],
+      season: null,
       budget: { ...BUDGET_INITIAL },
       restType: null,
       daysCount: null,
     }),
 }))
+
+/** Для API `POST /routes/from-quiz`: осень → `fall`, остальные slug без изменений. */
+export function seasonSlugToQuizApi(
+  slug: SeasonSlug,
+): 'spring' | 'summer' | 'fall' | 'winter' {
+  if (slug === 'autumn') return 'fall'
+  return slug
+}
 
 export function formatSeasonLabel(slug: SeasonSlug): string {
   const map: Record<SeasonSlug, string> = {

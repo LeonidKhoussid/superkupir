@@ -19,6 +19,7 @@ export const routeShareTokenParamsSchema = z.object({
 });
 
 export const listRoutesQuerySchema = z.object({
+  scope: z.enum(["accessible", "owned"]).default("accessible"),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -133,14 +134,74 @@ const quizAnswerValueSchema = z.union([
   z.array(z.number()),
 ]);
 
-export const createRouteFromQuizSchema = z.object({
-  title: trimmedString.max(200).optional(),
-  description: nullableTrimmedString,
-  season_id: nullableInt,
-  season_slug: z.string().trim().min(1).max(80).optional(),
-  desired_place_count: z.coerce.number().int().min(1).max(20).default(5),
-  quiz_answers: z.record(z.string(), quizAnswerValueSchema),
-  generated_place_ids: z.array(z.coerce.number().int().positive()).max(50).optional(),
-});
+const quizSeasonValues = ["spring", "summer", "autumn", "winter", "fall"] as const;
+const quizExcursionValues = ["активный", "умеренный", "спокойный"] as const;
+
+export const createRouteFromQuizSchema = z
+  .object({
+    /** Продуктовый контракт квиза (хакатон, rule-based генерация). */
+    people_count: z.coerce.number().int().min(1).max(50).optional(),
+    season: z.string().trim().min(1).max(80).optional(),
+    budget_from: z.coerce.number().min(0).max(50_000_000).optional(),
+    budget_to: z.coerce.number().min(0).max(50_000_000).optional(),
+    excursion_type: z.string().trim().min(1).max(40).optional(),
+    days_count: z.coerce.number().int().min(1).max(30).optional(),
+    title: trimmedString.max(200).optional(),
+    description: nullableTrimmedString,
+    season_id: nullableInt,
+    season_slug: z.string().trim().min(1).max(80).optional(),
+    desired_place_count: z.coerce.number().int().min(1).max(20).default(5),
+    /** Legacy: пустой объект допустим; для v2 не обязателен. */
+    quiz_answers: z.record(z.string(), quizAnswerValueSchema).optional(),
+    generated_place_ids: z.array(z.coerce.number().int().positive()).max(50).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const isV2 =
+      val.people_count !== undefined &&
+      val.season !== undefined &&
+      val.season.trim() !== "" &&
+      val.budget_from !== undefined &&
+      val.budget_to !== undefined &&
+      val.excursion_type !== undefined &&
+      val.excursion_type.trim() !== "" &&
+      val.days_count !== undefined;
+
+    if (isV2) {
+      const budgetFrom = val.budget_from as number;
+      const budgetTo = val.budget_to as number;
+      if (budgetFrom > budgetTo) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "budget_to must be greater than or equal to budget_from",
+          path: ["budget_to"],
+        });
+      }
+      const se = (val.season as string).trim().toLowerCase();
+      if (!quizSeasonValues.includes(se as (typeof quizSeasonValues)[number])) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "season must be spring, summer, autumn, winter, or fall",
+          path: ["season"],
+        });
+      }
+      const ex = (val.excursion_type as string).trim().toLowerCase();
+      if (!quizExcursionValues.includes(ex as (typeof quizExcursionValues)[number])) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "excursion_type must be активный, умеренный, or спокойный",
+          path: ["excursion_type"],
+        });
+      }
+    } else if (val.quiz_answers === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Provide people_count, season, budget_from, budget_to, excursion_type, days_count, or legacy quiz_answers",
+        path: ["quiz_answers"],
+      });
+    }
+  });
+
+export type CreateRouteFromQuizBody = z.infer<typeof createRouteFromQuizSchema>;
 
 export type RoutePlaceInput = z.infer<typeof routePlaceInputSchema>;

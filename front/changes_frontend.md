@@ -4,6 +4,486 @@
 
 ---
 
+## [2026-03-22] - Совместное редактирование маршрута по ссылке (одна запись, revision, UX)
+
+**Type:** feature (collaborative share/edit, conflict handling)
+
+**What changed:**
+- **`MyRoutesPage`**: список через **`GET /routes?scope=accessible`** — видны свои и приглашённые маршруты; на карточках бейдж **«Совместное редактирование»** / **«Только просмотр»**; обновлены тексты intro / auth wall.
+- **`RouteDetailPage`**: при **`409`** при сохранении — отдельное состояние **`conflict`**, блок с кнопкой **«Загрузить актуальную версию с сервера»**; подсказка для **`access_type === collaborator`**; **`ShareModal`** — флаг **`collaborativeEdit`** и зелёный блок про совместное редактирование и версии; при создании ссылки сохраняется **`shareCollaborative`** из **`link.can_edit`**.
+- **`RouteSharedPage`**: владелец видит переход на **`/routes/:id`** без **`access`**; приглашённый — явные подписи кнопок **«…и редактировать»** / **(просмотр)**; тексты про один маршрут на сервере и не-live синхронизацию.
+- **`RoutePanoramaPage`**: **`409`** при сохранении → режим **`conflict`** и кнопка **«Загрузить с сервера»**.
+
+**Why it changed:**
+- Шаринг должен означать работу **с тем же маршрутом**, что и владелец, с ручным сохранением и безопасной обработкой конфликтов **`revision_number`**, а не только просмотр по ссылке.
+
+**Files touched:** `front/src/pages/MyRoutesPage.tsx`, `front/src/pages/RouteDetailPage.tsx`, `front/src/pages/RouteSharedPage.tsx`, `front/src/pages/RoutePanoramaPage.tsx`, `front/memory_frontend.md`, `front/changes_frontend.md`.
+
+**Testing:** `cd front && npm run lint && npm run build`.
+
+---
+
+## [2026-03-22] - Шаринг маршрута: страница `/routes/shared/:token` и публичный fetch по токену
+
+**Type:** feature / fix (route sharing E2E)
+
+**What changed:**
+- Добавлена **`RouteSharedPage`**: маршрут **`/routes/shared/:token`** в **`App.tsx`** (объявлен **выше** **`/routes/:id`**, чтобы путь не матчился как числовой id).
+- **`features/routes/routesApi.ts`**: **`fetchSharedRouteByToken`** — **`GET /routes/shared/:token`** без JWT; **`attachSharedRouteToUser`** — **`POST /routes/shared/:token/access`**; тип **`SharedRouteDetail`** (**`UserRouteDetail`** + **`share_can_edit`** из **`can_edit`** в JSON).
+- Просмотр по ссылке: карта (**`RouteYandexMap`**), сводка, основные точки и «отдых/еда», ссылки на **`/places/:id`**, состояния загрузки / ошибки / «Повторить». Для авторизованных — **«Добавить в Мои туры»** с редиректом на **`/routes/:id`**.
+- Модалка «Поделиться» на **`/routes/:id`**: текст обновлён — ссылка ведёт на реальный экран приложения, а не «позже».
+
+**Why it changed:**
+- Раньше копируемая публичная ссылка не имела рабочего экрана в SPA; теперь цепочка share → открытие → просмотр (и опционально attach) работает при раздельных origin фронта и API.
+
+**Files touched:** `front/src/pages/RouteSharedPage.tsx`, `front/src/App.tsx`, `front/src/pages/RouteDetailPage.tsx`, `front/src/features/routes/routesApi.ts`, `front/memory_frontend.md`, `front/changes_frontend.md`, `back/memory_backend.md`, `back/changes_backend.md`, `back/backend_db_structure.md`.
+
+**Testing:** `cd front && npm run lint && npm run build`; `cd back && npm run check && npm run build`.
+
+---
+
+## [2026-03-22] - `/places`: рекомендации — сдерживать уже выбранные типы, показывать остальные по близости
+
+**Type:** fix / feature (route builder UX)
+
+**What changed:**
+- Убран режим «после первого выбора только **`type_slug`** якоря и **`limit` 6»**.
+- **`fetchPlaceRecommendations`** вызывается с **`limit` 32** без **`type_slug`**; ответ фильтруется, сортируется по **`distance_km`**, затем **`diversifyRecommendationsBySelectedTypes`**: не больше **3** новых карточек на каждый тип, уже попавший в маршрут; до **24** карточек в блоке.
+- Подзаголовок секции рекомендаций обновлён под эту логику.
+
+**Why it changed:**
+- Продукт: если пользователь уже добавил, например, ресторан, дальше нужны в основном **другие** категории рядом с якорем, а не ещё пачка ресторанов.
+
+**Files touched:** `front/src/pages/PlacesCatalogPage.tsx`, `front/memory_frontend.md`, `front/changes_frontend.md`.
+
+**Testing:** `cd front && npm run lint && npm run build`.
+
+---
+
+## [2026-03-22] - `/routes/:id/panorama`: Яндекс Панорамы вместо Google iframe
+
+**Type:** feature / refactor (карты Яндекса)
+
+**What changed:**
+- Удалён **`googlePanoramaUrls.ts`** (ранее URL для iframe Google).
+- Добавлены **`routePanoramaHelpers.ts`** (координаты, порядок остановок, дефолтная точка) и **`RouteYandexPanoramaView.tsx`** на **`@pbe/react-yandex-maps`** (**`Panorama`** + **`Map`** со спутником).
+- **`RoutePanoramaPage`**: вместо **`<iframe>`** — **`RouteYandexPanoramaView`**, ключ **`VITE_YANDEX_MAPS_API_KEY`**; без ключа — подсказка в UI.
+- Зависимость **`@pbe/react-yandex-maps`**, для React 19 — **`legacy-peer-deps`** (см. **`front/.npmrc`**).
+- Обновлены **`memory_frontend.md`**, комментарий в **`routeReviewHelpers.ts`**.
+
+**Why it changed:**
+- Единый стек карт с каталогом (Яндекс), интерактивная панорама через официальный JS API 2.1.
+
+**Files touched:** `front/src/pages/RoutePanoramaPage.tsx`, `front/src/components/RouteYandexPanoramaView.tsx`, `front/src/features/routes/routePanoramaHelpers.ts`, `front/src/features/routes/routeReviewHelpers.ts`, `front/package.json`, `front/package-lock.json`, `front/.npmrc`, `front/memory_frontend.md`, `front/changes_frontend.md` (удалён `googlePanoramaUrls.ts` при наличии в репо).
+
+**Testing:** `cd front && npm run lint && npm run build`.
+
+---
+
+## [2026-03-22] - Квиз-маршрут: порядок точек на карте (доки)
+
+**Type:** chore (docs; логика на бэкенде)
+
+**What changed:** В **`memory_frontend.md`** уточнено, что порядок остановок квиз-маршрута задаётся сервером (гео-упорядочивание).
+
+**Backend:** см. **`back/changes_backend.md`** — `RoutesService` + nearest-neighbor.
+
+---
+
+## [2026-03-22] - Квиз → сохранённый маршрут: `POST /routes/from-quiz`, экран «сборки», один сезон
+
+**Type:** feature (quiz route builder, mock «генерация»)
+
+**What changed:**
+- **`features/quiz/quizStore.ts`**: один выбранный **`season`** вместо массива **`seasons`**; **`setSeason`**; **`seasonSlugToQuizApi`** (осень → `fall` в JSON API).
+- **`data/quizSteps.ts`**: шаг сезона с **`kind: 'season'`** (один выбор).
+- **`features/quiz/QuizPage.tsx`**: прогресс «шаг N из 5», полоса прогресса, радио-выбор сезона, кнопки **«Назад»** / **«Далее»**.
+- **`pages/QuizDonePage.tsx`**: сводка ответов, **«Собрать маршрут»** (гость → **`requestAuthModalOpen`**), экран загрузки с ротацией статусов **~6.6 с** параллельно с **`createRouteFromQuiz`** (**`Promise.all`** с задержкой), редирект на **`/routes/:id`**.
+- **`features/routes/routesApi.ts`**: **`createRouteFromQuiz`**, тип **`CreateRouteFromQuizInput`**.
+- Обновлены **`front/memory_frontend.md`**, **`front/changes_frontend.md`**.
+
+**Why it changed:**
+- Продуктовый флоу квиза с имитацией подбора маршрута и реальной записью маршрута в БД через бэкенд.
+
+**Backend:** см. **`back/changes_backend.md`** (`POST /routes/from-quiz`).
+
+**Files touched:** `front/src/features/quiz/quizStore.ts`, `front/src/data/quizSteps.ts`, `front/src/features/quiz/QuizPage.tsx`, `front/src/pages/QuizDonePage.tsx`, `front/src/features/routes/routesApi.ts`, `front/memory_frontend.md`, `front/changes_frontend.md`
+
+**Testing:** `cd front && npm run lint && npm run build`; `cd back && npm run check && npm run build`.
+
+---
+
+## [2026-03-22] - `/routes/:id/panorama`: iframe Google без ключей API в приложении
+
+**Type:** refactor (встраивание как «обычный» embed)
+
+**What changed:**
+- Убраны **Maps JavaScript API**, **`GoogleMapsPanoramaPane`**, **`googleMapsJsLoader`**, переменная **`VITE_GOOGLE_MAPS_API_KEY`**, devDependency **`@types/google.maps`**, тип **`google.maps`** в **`tsconfig.app.json`**.
+- **`RoutePanoramaPage`**: снова **`<iframe src={...}>`**; URL собираются в **`googlePanoramaUrls.ts`**: **`buildGoogleKeylessStreetViewEmbedUrl`** (`maps.google.com/maps`, **`layer=c`**, **`cbll`**, **`output=svembed`**) и **`buildGoogleKeylessSatelliteMapEmbedUrl`** (`www.google.com/maps`, **`output=embed`**, **`t=k`** для спутника).
+- **`readme.md`**, **`vite-env.d.ts`**: панорама не требует своего ключа в **`.env`**.
+
+**Why it changed:**
+- Запрос: встроить карту/улицу через **iframe**, **без** ключей Maps API в проекте.
+
+**Files touched:** `front/src/pages/RoutePanoramaPage.tsx`, `front/src/features/routes/googlePanoramaUrls.ts`, удалены `front/src/components/GoogleMapsPanoramaPane.tsx`, `front/src/lib/googleMapsJsLoader.ts`, `front/package.json`, `front/package-lock.json`, `front/tsconfig.app.json`, `front/src/vite-env.d.ts`, `front/readme.md`, `front/memory_frontend.md`, `front/changes_frontend.md`.
+
+**Testing:** `cd front && npm run lint && npm run build`.
+
+---
+
+## [2026-03-22] - `/places`: рекомендации после первого выбора — только тот же тип, мало карточек
+
+**Type:** feature (route builder)
+
+**What changed:**
+- После того как в маршруте есть ≥1 место и у якоря известен **`type_slug`**, **`fetchPlaceRecommendations`** отправляет **`type_slug`** и **`limit: 6`**; иначе **`limit: 24`** без фильтра типа.
+- Подзаголовок блока рекомендаций поясняет режим «до 6 точек той же категории».
+- **`features/places/placesApi.ts`**: тело запроса поддерживает **`type_slug`**.
+
+**Backend:** опциональный **`type_slug`** в **`POST /places/recommendations`** (см. **`back/changes_backend.md`**).
+
+**Files touched:** `front/src/pages/PlacesCatalogPage.tsx`, `front/src/features/places/placesApi.ts`, `front/memory_frontend.md`, `front/changes_frontend.md`, `back/...`
+
+**Testing:** `cd front && npm run lint && npm run build`; `cd back && npm run check && npm run build`.
+
+---
+
+## [2026-03-22] - `/places`: реактивные рекомендации, якорь, дистанция и broad-fallback
+
+**Type:** feature / fix (route builder UX + recommendations)
+
+**What changed:**
+- **`pages/PlacesCatalogPage.tsx`**: сигнатура перезапроса рекомендаций **`recSignature`** теперь включает **`anchorPlaceId`** (раньше смена якоря без изменения списка выбранных не триггерила fetch). При смене зависимостей сразу **`setRecommendationsLoading()`**, debounce **~160ms**, ответ фильтруется по актуальному **`selectedIds`/`swipeRejectedIds`**; в стор передаётся **`recommendation_broad_fallback`**. Секция рекомендаций: заголовок **«Следующие точки маршрута»**, подзаголовок с якорем и сезоном, предупреждение при broad-fallback; сортировка рекомендаций по **`distance_km`**, затем **`id`**. В липкой панели чипы: клик по **имени** точки — **`setRouteAnchor`** (подсветка якоря).
+- **`features/routeCart/routeCartStore.ts`**: **`recommendationsBroadFallback`**, **`setRouteAnchor`**, **`setRecommendationsResult(items, broadFallback?)`**.
+- **`features/places/placesApi.ts`**: парсинг **`recommendation_broad_fallback`**, **`formatRecommendationDistanceKm`**.
+- **`components/PlacesSwipeDeck.tsx`**: чип расстояния на верхней карточке при наличии **`distance_km`**.
+
+**Why it changed:**
+- Подбор из «Места» должен обновляться при якоре/корзине/пропусках и ясно показывать расстояние и режим «широкого» fallback.
+
+**Backend:** см. **`back/changes_backend.md`** (`POST /places/recommendations`).
+
+**Files touched:**
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/src/features/routeCart/routeCartStore.ts`
+- `front/src/features/places/placesApi.ts`
+- `front/src/components/PlacesSwipeDeck.tsx`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+- `back/changes_backend.md`
+- `back/memory_backend.md`
+- `back/backend_db_structure.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+- `cd back && npm run check && npm run build` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id/panorama`: Street View через Maps JavaScript API (без Embed / iframe)
+
+**Type:** refactor (тот же UX, другой способ встраивания)
+
+**What changed:**
+- Вместо iframe **`maps/embed/v1/streetview`** и **`.../view`** используется **Maps JavaScript API**: **`lib/googleMapsJsLoader.ts`** подключает **`https://maps.googleapis.com/maps/api/js?key=...&loading=async`**, **`components/GoogleMapsPanoramaPane.tsx`** создаёт **`google.maps.StreetViewPanorama`** и при режиме «Улица» вызывает **`StreetViewService.getPanorama`** (радиус 100 м, **`NEAREST`**); при отсутствии панорамы — подсказка переключиться на «Карта»; режим «Карта» — **`google.maps.Map`** со спутником. Типы: devDependency **`@types/google.maps`**.
+- **`pages/RoutePanoramaPage.tsx`**: вместо **`iframeSrc`** — пропсы **`lat`/`lng`** в панель; текст про ключ — **Maps JavaScript API** и ссылка на [Street View for Web](https://developers.google.com/streetview/web).
+- **`features/routes/googlePanoramaUrls.ts`**: удалены **`buildGoogleStreetViewEmbedUrl`** / **`buildGoogleMapViewEmbedUrl`**; остались координаты, **`getDefaultPanoramaStopIndex`**, **`orderedRoutePlaceRows`**.
+- **`vite-env.d.ts`**, **`front/readme.md`**, **`memory_frontend.md`**: ключ **`VITE_GOOGLE_MAPS_API_KEY`** описан под JS API, не Embed API.
+
+**Why it changed:**
+- Требование продукта: интерактивный Street View через JS API, в духе официального обзора [Street View for Web](https://developers.google.com/streetview/web).
+
+**Files touched:**
+- `front/src/lib/googleMapsJsLoader.ts` (новый)
+- `front/src/components/GoogleMapsPanoramaPane.tsx` (новый)
+- `front/src/pages/RoutePanoramaPage.tsx`
+- `front/src/features/routes/googlePanoramaUrls.ts`
+- `front/package.json` / `package-lock.json` (`@types/google.maps`)
+- `front/tsconfig.app.json` — в **`compilerOptions.types`** добавлен **`google.maps`** (вместе с **`vite/client`**), чтобы **`window.google`** и **`google.maps.*`** проходили **`tsc`**
+- `front/src/vite-env.d.ts`
+- `front/readme.md`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` и `npm run build` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id/panorama`: отдельная страница Google Street View + навигация по точкам
+
+**Type:** feature (замена Yandex-модалки)
+
+**What changed:**
+- **Новый маршрут** **`/routes/:id/panorama`** (`App.tsx` — объявлен **выше** **`/routes/:id`**). Страница **`pages/RoutePanoramaPage.tsx`**: полноэкранный layout, **синяя боковая панель** со списком всех остановок маршрута в порядке **`sort_order`**, миниатюра (**`getPrimaryDisplayPhotoUrl`**), заголовок, сниппет описания, бейдж **«Отдых / еда»** для hospitality-type; точки **без координат** неактивны. **Справа** — крупный **iframe** Google (**Street View** или **спутник** переключателем «Улица» / «Карта»). Выбор точки в сайдбаре меняет **`src`** iframe (**свои координаты на каждую точку**). Кнопка **«← К маршруту»** → **`/routes/:id`**. **«Сохранить маршрут»** вызывает тот же **`syncRouteStopsToServer`**, что и review-страница (после **`GET /routes/:id`** синхронизирует состав с сервером; без локальных правок — подтверждение без изменений).
+- **`features/routes/googlePanoramaUrls.ts`**: **`buildGoogleStreetViewEmbedUrl`**, **`buildGoogleMapViewEmbedUrl`**, **`placeHasPanoramaCoordinates`**, **`getDefaultPanoramaStopIndex`**, **`orderedRoutePlaceRows`**. URL: **`https://www.google.com/maps/embed/v1/streetview`** и **`.../view`** (нужен **`VITE_GOOGLE_MAPS_API_KEY`**). Дефолтная точка: первая **не** hospitality с координатами, иначе первая с координатами. Query **`?place=<place_id>`** задаёт стартовую точку (компонент с **`key`** сбрасывает ручной выбор при смене query).
+- **`features/routes/syncRouteStopsToServer.ts`**: вынесена логика синхронизации остановок из **`RouteDetailPage`** (импорт в review и panorama).
+- **`pages/RouteDetailPage.tsx`**: удалены **PanoramaModal**, Yandex iframe, состояние панорамы; кнопка **«360 / Панорама»** — **`Link`** на **`/routes/:id/panorama`**.
+- **`features/routes/routeReviewHelpers.ts`**: удалены **`buildPanoramaEmbedUrl`** и **`getRoutePanoramaTargetPlace`** (Yandex).
+- **`vite-env.d.ts`**: **`VITE_GOOGLE_MAPS_API_KEY`**. **`front/readme.md`**: заметка про ключ.
+
+**Why it changed:**
+- Продукт: панорама не в модалке, переключение **по каждой** точке маршрута, провайдер **Google**.
+
+**Backend:**
+- Изменений API не требуется: используется существующий **`GET /routes/:id`** (места с **`lat`/`lon`**, **`photo_urls`**, **`type_slug`**, описание).
+
+**Files touched:**
+- `front/src/pages/RoutePanoramaPage.tsx` (новый)
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/src/features/routes/googlePanoramaUrls.ts` (новый)
+- `front/src/features/routes/syncRouteStopsToServer.ts` (новый)
+- `front/src/features/routes/routeReviewHelpers.ts`
+- `front/src/App.tsx`
+- `front/src/vite-env.d.ts`
+- `front/readme.md`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+- `back/changes_backend.md`
+- `back/memory_backend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+- `cd back && npm run check && npm run build` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id`: карта ~60vh (clamp до 720px)
+
+**Type:** UX (route detail polish)
+
+**What changed:**
+- **`pages/RouteDetailPage.tsx`**: высота контейнера карты **`clamp(220px, 60vh, 720px)`** вместо 40vh / max 520px.
+
+**Files touched:**
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint`, `cd front && npm run build` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id`: карта ~40vh, отдельный скролл правой колонки
+
+**Type:** UX (route detail layout)
+
+**What changed:**
+- **`pages/RouteDetailPage.tsx`**: высота карты **`clamp(220px, 40vh, 520px)`**. На **`lg`** **`main`** снова **`overflow-hidden`**, **`grid-rows-[minmax(0,1fr)]`**, **`h-full` / `min-h-0`**, чтобы строка сетки занимала оставшуюся высоту под шапкой; **правая колонка** (`aside`) с **`lg:h-full`**, **`lg:overflow-y-auto`**, **`lg:overscroll-contain`** — прокручивается только она, страница в целом не уезжает. **Левая колонка** при переполнении имеет **`lg:overflow-y-auto`** (редкий случай). Внутренние **`max-h`** у списков точек убраны: один общий скролл по правой панели.
+
+**Files touched:**
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint`, `cd front && npm run build` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id`: компактная карта, кнопки под картой, скролл `main` вместо `overflow-hidden`
+
+**Type:** fix (route detail layout)
+
+**What changed:**
+- **`pages/RouteDetailPage.tsx`**: карта с **`clamp`-высотой** и пропом **`compact`** у **`RouteYandexMap`**; блок **«360 / Панорама»**, **«Сохранить»**, **«Поделиться»** и тексты под ними перенесены **под карту** в левую колонку; блок **«Карта маршрута»** + дистанция — ниже. Убран **`lg:overflow-hidden`** у корня; **`main`** с **`overflow-y-auto`**, **`lg:items-start`** и без жёсткой строки сетки **`1fr`** — правая колонка не сжимается из‑за «высоты на весь экран» левой. **`aside`** — простой столбец без четырёхрядной сетки; списки точек с **`max-h-[min(…)]`** и **`overflow-y-auto`**.
+- **`components/RouteYandexMap.tsx`**: опциональный **`compact`** ( **`min-h-0`**, без **`flex-1`** на корне).
+- **`features/routes/routeReviewHelpers.ts`**: комментарий, что модуль — логика без UI.
+
+**Why it changed:**
+- Перекрытие нижних кнопок из‑за фиксированного **`100dvh`** + **`overflow-hidden`** и конкурирующих **`1fr`**-рядов в сайдбаре; целевой UX — меньшая карта и действия сразу под ней (как в референсе).
+
+**Files touched:**
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/src/components/RouteYandexMap.tsx`
+- `front/src/features/routes/routeReviewHelpers.ts`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id`: fix clipped route sections in the right sidebar
+
+**Type:** fix (route review layout)
+
+**What changed:**
+- **`pages/RouteDetailPage.tsx`**: desktop review grid now explicitly uses a constrained content row (`lg:grid-rows-[minmax(0,1fr)]`) so the right sidebar is sized from the viewport instead of from overflowing content.
+- The **`Основные точки`** and **`Отдых и еда`** list areas are now true `flex-1 min-h-0 overflow-y-auto` scroll regions inside their cards, instead of auto-height blocks that could be clipped out of view by the page shell.
+- This keeps the summary card, both route-point sections, and the bottom action row visible together in the desktop 100dvh layout.
+
+**Why it changed:**
+- After the route review redesign, the sidebar cards could disappear below the fold because the page shell hid overflow while the two point lists still sized themselves from content height rather than from the available viewport height.
+
+**Files touched:**
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id`: fix map visibility, single panorama modal, frontend-owned share URL, 100vh shell
+
+**Type:** fix (route review UX / layout / share)
+
+**What changed:**
+- **`components/RouteYandexMap.tsx`**: fixed the desktop map collapse by keeping a real minimum height on the map container and letting it stretch through an explicit height chain; `/routes/:id` now gives the map column a true viewport-height layout instead of relying on auto height.
+- **`pages/RouteDetailPage.tsx`**: page shell rebuilt into a desktop **100dvh** review layout: header at top, map panel on the left, right column with stacked cards, and internal scrolling only inside the two point-list sections. The route page itself no longer needs a normal long desktop page scroll.
+- Removed all per-point 360 buttons. Added **one route-level `360 / Панорама` button** that chooses the best representative stop (first main point with coordinates, otherwise first coordinate-bearing stop) and opens a large modal with an embedded iframe instead of redirecting the user out of the app.
+- **`features/routes/routeReviewHelpers.ts`** now contains explicit helpers for panorama target selection and embed URL generation, plus a frontend public share URL builder.
+- Fixed share-link generation on the route page: copied links are now built as **frontend-owned URLs** via **`VITE_PUBLIC_APP_URL`** with `window.location.origin` fallback for local dev, instead of `http://localhost:3000/...` backend links.
+- **`src/vite-env.d.ts`** extended with `VITE_PUBLIC_APP_URL` for the deployment-safe share-link origin.
+
+**Why it changed:**
+- The route page had four user-facing regressions at once: the map could collapse on desktop, the page scrolled like a long document instead of fitting the viewport, 360 actions were implemented on each point instead of once for the route, and share links were tied to the backend origin instead of the frontend app origin.
+
+**Files touched:**
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/src/components/RouteYandexMap.tsx`
+- `front/src/features/routes/routeReviewHelpers.ts`
+- `front/src/vite-env.d.ts`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+- `cd back && npm run check` — успешно.
+- `cd back && npm run build` — успешно.
+- `node -e "const { createApp } = require('./dist/app'); ..."` — успешно.
+- `node -e "const { openApiSpec } = require('./dist/swagger/openapi-spec'); ..."` — успешно.
+
+---
+
+## [2026-03-22] - `/routes/:id`: маршрут-ревью с реальным save/share, сводкой и 360-кнопками
+
+**Type:** feature (route review / save-share UX)
+
+**What changed:**
+- **`pages/RouteDetailPage.tsx`** переработана под review-layout: карта слева, справа стек панелей с summary-card, секцией основных точек, отдельной секцией гостиниц/ресторанов и нижним action-row.
+- Добавлены summary-метрики маршрута: группа (только для `creation_mode=quiz`), длительность, бюджет, сезон, фактическая длина маршрута и статус шаринга. Длительность считается по hackathon-правилу: **1 день на каждую точку, кроме hotel / guest_house / recreation_base / restaurant / gastro / cheese, минимум 1 день**.
+- **`components/RouteYandexMap.tsx`** теперь поднимает дорожные метрики в родителя: если Yandex multi-route отдаёт расстояние, `/routes/:id` показывает его как основную длину маршрута; при сбое маршрутизации используется честный approximate fallback по ломаной между точками.
+- Каждая точка маршрута теперь имеет явные действия: открыть место, **360° вид** (через координатный panorama/street-view URL), а при edit-доступе — перемещение вверх/вниз и удаление.
+- Локальное редактирование перестало быть тупиковым: страница использует реальные backend route-place endpoints для сохранения порядка/состава маршрута через кнопку **«Сохранить маршрут»**, с учётом `revision_number` и сообщением о конфликте при `409`.
+- Кнопка **«Поделиться»** теперь использует существующий backend `POST /routes/:id/share`: создаёт временную ссылку доступа, открывает небольшое share-окно и пытается сразу скопировать URL в буфер.
+- **`features/routes/routesApi.ts`** расширен mutation-helper'ами для `POST/PATCH/DELETE /routes/:id/places` и `POST /routes/:id/share`; добавлен helper-модуль **`features/routes/routeReviewHelpers.ts`** для правил duration/season/budget/panorama/grouping.
+
+**Why it changed:**
+- Страница `/routes/:id` должна выглядеть как полноценный review/travel-planning экран, а не как локальный session-only редактор.
+- Пользователю нужен реальный save action, видимая дистанция маршрута из карты и намеренный share UX уже сейчас, даже если полный deeplink/user-sharing UI будет позже.
+
+**Files touched:**
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/src/components/RouteYandexMap.tsx`
+- `front/src/features/routes/routesApi.ts`
+- `front/src/features/routes/routeReviewHelpers.ts`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+- `cd back && npm run check` — успешно.
+- `cd back && npm run build` — успешно.
+- Санити-проверки backend runtime-контракта: `node -e "const { createApp } = require('./dist/app'); ..."` и `node -e "const { openApiSpec } = require('./dist/swagger/openapi-spec'); ..."` — успешно.
+
+---
+
+## [2026-03-22] - `/places`: ленивая подгрузка UI (карточки + чанк колоды)
+
+**Type:** performance (lazy UI)
+
+**What changed:**
+- **`pages/PlacesCatalogPage.tsx`**: компонент **`LazyMountCatalogCard`** с **`IntersectionObserver`** (`rootMargin` ~280px / 400px по вертикали) — до появления слота в зоне просмотра показывается лёгкий плейсхолдер той же пропорции, затем монтируется полная **`CatalogPlaceCard`**; обёртка стоит на всех десктопных сетках (каталог без конструктора, «В маршруте», рекомендации, «Ещё из каталога»). **`PlacesSwipeDeck`** подключается через **`React.lazy`** + **`Suspense`** с fallback той же высоты, что у колоды, чтобы вынести свайп-модуль в отдельный JS-чанк на мобиле.
+- Уже существующие **`loading="lazy"`** на фото карточек не трогались.
+
+**Why it changed:**
+- На длинном каталоге не нужно сразу монтировать десятки тяжёлых карточек; на мобиле тяжёлая логика колоды не обязана попадать в основной бандл до захода на `/places`.
+
+**Files touched:**
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно; в сборке виден отдельный чанк **`PlacesSwipeDeck-*.js`**.
+
+---
+
+## [2026-03-22] - Ускорение каталога мест и удаление `external_id` из фронтенд-контракта
+
+**Type:** feature / fix (places performance / contract cleanup)
+
+**What changed:**
+- **`features/places/placesApi.ts`**: `PublicPlace` больше не содержит `external_id`; добавлены helper'ы для быстрой дозагрузки каталога (`appendUniquePlaces`) и разделены размеры первой страницы и фоновой догрузки.
+- **`pages/PlacesCatalogPage.tsx`** больше не блокирует первый рендер полным `fetchAllPlaces()`: теперь страница сначала получает первую страницу `GET /places` (`limit=24`), сразу рендерит каталог и продолжает догружать остальные страницы в фоне более крупными пачками.
+- Поиск на `/places` и список рекомендаций в каталоге переведены на `useDeferredValue(query)`, чтобы не пересчитывать большие массивы синхронно на каждый символ.
+- **`components/RouteAddStopModal.tsx`** тоже перестала тянуть весь каталог до показа контента: сначала открывается по первой странице, затем догружает остальное в фоне и показывает прогресс по количеству уже загруженных мест.
+- Фронтенд-парсинг мест полностью переведён на канонический числовой `id`; сериализация `external_id` больше не ожидается ни в карточках мест, ни в route-detail вложенных местах, ни в селекторе добавления остановки.
+
+**Why it changed:**
+- Основная задержка на `/places` была вызвана тем, что страница ждала загрузки всех страниц `GET /places` перед первым рендером, хотя пользователю для старта нужен только первый экран карточек.
+- `external_id` больше не нужен в пользовательском контракте: каноническим идентификатором места в приложении теперь является только внутренний числовой `id`.
+
+**Files touched:**
+- `front/src/features/places/placesApi.ts`
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/src/components/RouteAddStopModal.tsx`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+- Логически проверены: быстрый первый рендер `/places`, фоновая догрузка каталога, отсутствие `external_id` в фронтенд-типах/парсерах, работа селектора добавления остановок с числовым `place.id`.
+
+---
+
+## [2026-03-22] - `/myroutes`: страница «Мои Туры», owned-only список маршрутов и новый пункт навигации
+
+**Type:** feature (routes area / navigation)
+
+**What changed:**
+- Добавлена новая страница **`/myroutes`**: **`pages/MyRoutesPage.tsx`**. Она показывает только маршруты, созданные текущим пользователем, с loading / empty / error / auth-required состояниями и карточками-ссылками на **`/routes/:id`**.
+- **`features/routes/routesApi.ts`** расширен list-логикой: парсинг **`GET /routes`**, типы summary/list, и helper для загрузки owned-only списка через **`scope=owned`**.
+- В **`App.tsx`** зарегистрирован маршрут **`/myroutes`**.
+- Первичная навигация приведена к продуктовой тройке **`Места` / `Впечатления` / `Мои Туры`**:
+  - desktop nav на лендинге;
+  - desktop nav и mobile drawer на **`/places`**;
+  - desktop nav и mobile drawer на новой странице **`/myroutes`**.
+- Для гостя страница **`/myroutes`** показывает чистый auth wall с CTA на существующую auth-модалку и ссылкой в каталог; для пустого списка — отдельный empty state с CTA в **`/places`**.
+
+**Why it changed:**
+- Появился отдельный пользовательский раздел «Мои Туры», где в этой итерации нужно показывать только собственные маршруты без shared/collaboration UI.
+- Фронтенду был нужен явный сценарий owned-only загрузки списка маршрутов вместо смешивания созданных и shared маршрутов.
+
+**Files touched:**
+- `front/src/pages/MyRoutesPage.tsx`
+- `front/src/features/routes/routesApi.ts`
+- `front/src/App.tsx`
+- `front/src/pages/LandingPage.tsx`
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- `cd front && npm run lint` — успешно.
+- `cd front && npm run build` — успешно.
+- Логически проверены: регистрация маршрута **`/myroutes`**, наличие пункта **`Мои Туры`** в desktop nav и mobile drawer каталога, owned-only fetch flow, auth-required / empty / success состояния, переход по карточке в **`/routes/:id`**.
+
+---
+
 ## [2026-03-21] - `/routes/:id`: прямое редактирование остановок на странице (добавить / убрать / порядок), синхронизация карты
 
 **Type:** feature (route planner UX)

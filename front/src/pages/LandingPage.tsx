@@ -38,12 +38,12 @@ export function LandingPage() {
             <Link to="/places" className="hover:opacity-90">
               Места
             </Link>
-            <a href="#cities" className="hover:opacity-90">
-              Обзоры
+            <a href="#places" className="hover:opacity-90">
+              Впечатления
             </a>
-            <a href="#how" className="hover:opacity-90">
-              Мои туры
-            </a>
+            <Link to="/myroutes" className="hover:opacity-90">
+              Мои Туры
+            </Link>
           </nav>
           <LoginButton variant="on-hero" />
         </header>
