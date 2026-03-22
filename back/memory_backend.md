@@ -152,6 +152,9 @@
   - `estimated_duration_minutes`
   - `radius_group`
   - `is_active`
+- Internal-only place import metadata stored in `places`:
+  - `import_confidence`
+  - `city_distance_km`
 - `GET /places/:id` still uses the internal numeric `places.id`
 
 # Place taxonomy and seasonality
@@ -302,18 +305,47 @@
 - Canonical import dry run:
   - `npm run db:import:places -- --dry-run`
 - Import source:
-  - `/Users/leo/Downloads/scrapping.csv`
+  - `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv`
 - Canonical bootstrap status:
   - `create_product_schema.sql` is now self-contained for a fresh product DB
   - it no longer depends on running `db:init:auth` first
   - the documented canonical schema and the actual SQL/bootstrap files are now aligned
   - helper SQL files still exist, but they are no longer the primary init path
-- Import behavior:
-  - upserts into `places`
-  - uses the seeded `winery` place type
-  - stores `photo_urls` as JSON arrays
-  - assigns all seeded seasons to imported rows
-  - uses `source_location` as the initial `radius_group` fallback
+- Canonical CSV transformation rules:
+  - `type_name` is treated as the canonical place-type slug and upserted into `place_types`
+  - importer can create missing type slugs from the CSV beyond the original SQL seed set
+  - `season_slugs` is normalized into canonical backend seasons with `fall -> autumn`
+  - missing or invalid season values fall back to all four canonical seasons
+  - `primary_image_url` is treated as the primary photo and becomes the first item in `photo_urls`
+  - `photo_urls` field is parsed as extra image sources when present
+  - `website_url` maps into `card_url`
+  - `logo_url` stays `NULL` because the CSV does not provide it
+  - `short_description` is derived from `description` at roughly 200 chars with a word-boundary cutoff
+  - `estimated_cost` is parsed as numeric
+  - `estimated_duration_minutes` is currently left `NULL` because CSV `estimated_duration` values are not reliable enough to interpret as minutes
+  - `radius_group` now uses `city_used`, not the region-wide `source_location`
+  - `coordinates_raw` is derived as `"latitude,longitude"`
+  - `city_distance_km` stores the computed distance from the expected `city_used` center when that center is known
+  - `import_confidence` is `high` by default and becomes `low` for rows that exceed the `100km` city-distance threshold
+- Dedupe rules:
+  - raw `external_id` is only trusted as a dedupe key when it is unique in the CSV
+  - when `external_id` collides, dedupe falls back to `name + city_used + type_name`
+  - final fallback is `name + coordinates`
+  - canonical DB `external_id` is synthesized deterministically as a unique stable id using source/raw id/hash so it fits the schema even when the CSV raw ids collide
+  - duplicate groups are resolved by choosing the candidate closest to the expected city center, then by image quality, then by richer description / earlier row
+- Drop rules:
+  - rows are dropped immediately only if `name` is missing or `latitude` / `longitude` is invalid
+  - rows are no longer dropped solely for large city-distance values
+  - after dedupe, candidates more than `100km` from the expected `city_used` center are kept as low-confidence imports instead
+- Current dry-run result for the new CSV:
+  - `500` rows read
+  - `500` valid candidates after minimal validation
+  - `432` canonical places kept
+  - `68` duplicate candidate rows collapsed
+  - `0` final rows dropped
+  - `100` low-confidence imports retained because they exceed the `100km` city-distance threshold
+  - `10` place types derived
+  - `432` `place_seasons` links produced
 
 # Swagger / OpenAPI
 
@@ -369,9 +401,12 @@
 - Legacy databases still need the canonical bootstrap to be executed so the FK repair steps can move `place_likes` / `place_comments` onto canonical `places`.
 - Until `npm run db:init:product` is actually applied against a live database, the documented canonical structure should be treated as SQL-complete and dry-run-verified rather than DB-executed in this workspace.
 - Legacy winery source data does not contain real season metadata, so all seasons are attached during import as a temporary compatibility decision.
+- The new canonical CSV source has major raw `external_id` collisions and many coordinate candidates that are far from the expected city; the importer compensates with synthetic external ids, city-aware dedupe, and low-confidence import metadata instead of hard-dropping those rows.
+- Low-confidence imports are currently stored only as backend/internal metadata in `places`; the public `/places` API does not surface that flag yet.
 - `POST /routes/from-quiz` is a persistence wrapper around a placeholder route-generation boundary, not a real ML integration.
 - No realtime collaboration or websocket merge resolution exists; route conflicts are handled by optimistic locking only.
 - Live DB-backed runtime verification is still limited by the existing PostgreSQL connectivity problem; current verification is compile/build/openapi/app-start and dry-run based.
+- A real `npm run db:import:places` attempt against the configured DB was started in this workspace but stalled at the connection layer and was stopped, so the importer is transformation-complete and dry-run verified but not confirmed against a live reachable DB from this environment.
 
 # Pending tasks
 
@@ -406,3 +441,5 @@
   - Node app startup sanity via `createApp()`
   - OpenAPI load sanity from built output
   - in-process CORS preflight sanity for `PATCH`
+  - canonical new-CSV dry run summary: 500 raw rows -> 432 kept places, 100 low-confidence imports, 0 validation drops
+  - live `npm run db:import:places` attempt blocked by DB connection hang

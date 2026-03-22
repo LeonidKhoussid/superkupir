@@ -6,6 +6,7 @@
 - Canonical init command: `npm run db:init:product`
 - Canonical CSV import: `back/src/scripts/import-places.ts`
 - Canonical import command: `npm run db:import:places`
+- Canonical CSV source: `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv`
 - Canonical runtime place table: `places`
 - Runtime API docs:
   - `GET /openapi.json`
@@ -24,6 +25,9 @@ The backend runtime no longer treats `wineries` as the primary application table
 
 Canonical:
 - `back/sql/create_product_schema.sql`
+- `back/src/scripts/import-places.ts`
+  - canonical transformation + import pipeline for places CSV data
+  - reads the CSV source, normalizes rows, deduplicates candidates, upserts `place_types`, upserts `places`, and writes `place_seasons`
 
 Helper / legacy-support SQL:
 - `back/sql/create_auth_tables.sql`
@@ -35,6 +39,58 @@ Helper / legacy-support SQL:
 - `back/sql/create_wineries_table.sql`
   - legacy helper for the original raw winery table only
   - not part of the canonical runtime schema
+
+## Canonical CSV import rules
+
+Source file:
+- `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv`
+
+Field mapping:
+- `type_name` -> `place_types.slug`
+- CSV-derived type slugs are upserted into `place_types`
+- `season_slugs` -> canonical `seasons.slug`
+- `fall` is normalized to `autumn`
+- missing/invalid season values default to all four canonical seasons
+- `primary_image_url` becomes the first `photo_urls` item
+- `photo_urls` is parsed as additional image URLs when present
+- `website_url` -> `places.card_url`
+- `description` -> `places.description`
+- derived `short_description` -> `places.short_description`
+- `estimated_cost` -> `places.estimated_cost`
+- `estimated_duration` is currently not trusted enough to map to minutes, so `places.estimated_duration_minutes` stays `NULL`
+- `city_used` -> `places.radius_group`
+- `latitude` / `longitude` -> `places.latitude` / `places.longitude`
+- derived `coordinates_raw` -> `"latitude,longitude"`
+- `is_active` -> `places.is_active`
+- `distance(city_used, coordinates)` -> `places.city_distance_km` when the importer can resolve a city center
+- importer quality flag -> `places.import_confidence`
+
+Dedupe rules:
+- Use raw `external_id` only when it is unique in the CSV
+- Otherwise dedupe by `name + city_used + type_name`
+- Final fallback: `name + coordinates`
+- Final canonical `places.external_id` is synthesized deterministically from source/raw id/hash so it remains unique even when the CSV raw ids collide
+
+Row selection rules:
+- When a duplicate group exists, keep the candidate closest to the expected `city_used` center
+- Secondary preference is better image quality
+- Then prefer richer descriptions / earlier rows
+- The `100km` city-distance threshold is now a confidence threshold, not a delete threshold
+
+Drop rules:
+- Drop rows missing `name`
+- Drop rows with invalid `latitude`
+- Drop rows with invalid `longitude`
+- Do not drop rows solely because they are far from the expected city center
+- If the selected candidate is more than `100km` from the expected city center, keep it and mark it as `import_confidence = 'low'`
+
+Current dry-run result for the canonical CSV:
+- `500` raw rows
+- `432` kept canonical places
+- `68` duplicate rows collapsed
+- `0` rows dropped after validation
+- `100` low-confidence places retained because they exceed the `100km` city-distance threshold
+- `10` place types derived from the CSV
 
 ## Table list
 
@@ -79,6 +135,9 @@ Seeded values:
 - `event`
 - `museum`
 
+Import note:
+- The canonical CSV importer can add missing slugs such as `guest_house`, `recreation_base`, `restaurant`, `cheese`, and `workshop`.
+
 ### `seasons`
 
 Purpose:
@@ -122,17 +181,23 @@ Key columns:
 - `size TEXT`
 - `coordinates_raw TEXT`
 - `is_active BOOLEAN NOT NULL DEFAULT TRUE`
+- `import_confidence TEXT NOT NULL DEFAULT 'high'`
+- `city_distance_km NUMERIC(10,2)`
 - `created_at TIMESTAMPTZ`
 - `updated_at TIMESTAMPTZ`
 
 Important constraints:
 - `photo_urls` must be a JSON array.
+- `import_confidence` must be `high` or `low`.
 
 Important indexes:
 - `places_type_id_idx`
 - `places_source_location_idx`
 - `places_radius_group_idx`
 - `places_lat_lon_idx`
+
+Import note:
+- `import_confidence` and `city_distance_km` are backend/internal import metadata and are not required by the current public `/places` response contract.
 
 ### `place_seasons`
 
@@ -150,7 +215,8 @@ Important constraints:
 
 Seasonality rule:
 - Canonical places are expected to be associated with one or more seasons through this table.
-- During legacy winery import, all seeded seasons are attached because the CSV does not provide season-level detail yet.
+- During legacy winery import, all seeded seasons are attached because the old CSV does not provide season-level detail.
+- During canonical CSV import, per-row `season_slugs` are used when valid, with `fall -> autumn` normalization and an all-seasons fallback when the source season value is missing or invalid.
 
 ### `place_likes`
 
@@ -494,6 +560,8 @@ Current role:
 
 - ML route generation is still a placeholder boundary. `POST /routes/from-quiz` stores the route but does not call a real ML service yet.
 - Legacy databases still need the canonical bootstrap to be executed for the FK repair steps to run. Until `npm run db:init:product` is actually applied against that database, old `place_likes` / `place_comments` constraints may still point at `wineries`.
+- The canonical CSV contains severe raw `external_id` collisions and many geographically implausible duplicates, so importer heuristics are required to produce stable canonical places.
+- Far-distance rows are now retained as low-confidence imports instead of being dropped, so downstream consumers should not assume every imported place is equally geo-trustworthy.
 - Legacy winery imports attach all four seeded seasons because the source CSV does not include explicit season data.
 - No formal migration framework exists yet. The canonical bootstrap is still raw SQL-based.
 - Live DB runtime verification remains limited by the existing PostgreSQL connectivity issue; current verification is compile-time and dry-run based.

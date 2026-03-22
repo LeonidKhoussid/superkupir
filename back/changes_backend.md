@@ -1,3 +1,55 @@
+[2026-03-22 05:37] - Keep far-distance CSV places as low-confidence imports
+
+Type: fix
+
+What changed:
+	•	Updated `back/src/scripts/import-places.ts` so the canonical importer no longer drops deduped places solely because they are more than `100km` from the expected `city_used` center.
+	•	Kept the existing dedupe and candidate ranking rules, but converted the city-distance threshold into an import-quality marker: far-distance rows are now imported with `import_confidence = 'low'` and their `city_distance_km` stored for backend visibility.
+	•	Extended `back/sql/create_product_schema.sql` so canonical `places` now includes `import_confidence` and `city_distance_km`, with additive `ALTER TABLE` support for existing databases and a confidence check constraint.
+	•	Updated the importer summary to report low-confidence imports explicitly while reserving hard drops for true validation failures only.
+	•	Reran `npm run check`, `npm run build`, `npm run db:init:product -- --dry-run`, `npm run db:import:places -- --dry-run`, app startup sanity, and OpenAPI load sanity.
+	•	New dry-run result for the canonical CSV is now: `500` rows read, `500` valid candidates, `432` kept places, `0` dropped rows, `68` duplicate rows removed, `432` place-season links, and `100` low-confidence imports.
+	•	Retried a real `npm run db:import:places`, but it again stalled at the PostgreSQL connection layer and had to be stopped; the runtime DB reachability limitation remains unchanged.
+
+Why it changed:
+	•	The previous `implausible_city_distance` rule was too destructive for the current CSV and discarded otherwise valid places simply because the best deduped coordinate candidate was far from the expected city center.
+	•	The backend needs to preserve as much usable place content as possible while still retaining explicit visibility into lower-confidence geo imports.
+
+Files touched:
+	•	back/src/scripts/import-places.ts
+	•	back/sql/create_product_schema.sql
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+	•	back/backend_db_structure.md
+
+⸻
+
+[2026-03-22 05:22] - Rework canonical places import for the new 500-row CSV source
+
+Type: feature
+
+What changed:
+	•	Rewrote `back/src/scripts/import-places.ts` so `npm run db:import:places` now uses `/Users/leo/Documents/superkiper/back/places_with_images_all_in_one_repriced_image_urls_updated.csv` as the canonical source of truth for place content import.
+	•	Added canonical CSV transformation rules in code: `type_name` -> `place_types`, `season_slugs` with `fall -> autumn`, `primary_image_url` -> first `photo_urls` item, derived `short_description`, `website_url` -> `card_url`, `city_used` -> `radius_group`, and derived `coordinates_raw`.
+	•	Implemented non-destructive canonical dedupe logic with synthetic stable `external_id` values because the CSV raw `external_id` column has severe collisions and cannot be trusted globally.
+	•	Dedupe priority is now: unique raw `external_id`, otherwise `name + city_used + type_name`, otherwise `name + coordinates`; duplicate groups choose the candidate closest to the expected city center, then better image quality, then richer description / earlier row.
+	•	Added a row-quality guard that drops records only when required fields are missing/invalid or when the best deduped candidate is more than `100km` from the expected city center, because those coordinates are treated as implausible for the target region.
+	•	Dry-run validation of the current CSV now reports: `500` rows read, `500` minimally valid candidates, `332` kept canonical places, `68` duplicate rows collapsed, `100` rows dropped for `implausible_city_distance`, and `10` CSV-derived place types.
+	•	Attempted a real `npm run db:import:places`, but the run stalled at the database connection layer and had to be stopped; this matches the existing backend DB reachability limitation rather than a transformation error in the importer itself.
+	•	Updated backend docs so the canonical import path, CSV source, type/season/photo mapping, dedupe rules, defaults, and dropped-row behavior match the actual importer.
+
+Why it changed:
+	•	The previous canonical importer was still built around the older winery CSV and did not understand the new backend-owned CSV shape or the canonical taxonomy/season schema.
+	•	The new CSV has broken raw ids and many duplicate geo candidates, so the backend needed a real transformation pipeline instead of a simple row upsert.
+
+Files touched:
+	•	back/src/scripts/import-places.ts
+	•	back/changes_backend.md
+	•	back/memory_backend.md
+	•	back/backend_db_structure.md
+
+⸻
+
 [2026-03-21 22:41] - Make the canonical DB bootstrap self-contained and resolve legacy SQL conflicts
 
 Type: fix

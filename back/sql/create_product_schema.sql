@@ -64,10 +64,32 @@ CREATE TABLE IF NOT EXISTS places (
   size TEXT,
   coordinates_raw TEXT,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  import_confidence TEXT NOT NULL DEFAULT 'high',
+  city_distance_km NUMERIC(10, 2),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CONSTRAINT places_photo_urls_array CHECK (jsonb_typeof(photo_urls) = 'array')
+  CONSTRAINT places_photo_urls_array CHECK (jsonb_typeof(photo_urls) = 'array'),
+  CONSTRAINT places_import_confidence_check CHECK (import_confidence IN ('high', 'low'))
 );
+
+ALTER TABLE IF EXISTS places
+  ADD COLUMN IF NOT EXISTS import_confidence TEXT,
+  ADD COLUMN IF NOT EXISTS city_distance_km NUMERIC(10, 2);
+
+UPDATE places
+SET import_confidence = 'high'
+WHERE import_confidence IS NULL;
+
+ALTER TABLE IF EXISTS places
+  ALTER COLUMN import_confidence SET DEFAULT 'high',
+  ALTER COLUMN import_confidence SET NOT NULL;
+
+ALTER TABLE IF EXISTS places
+  DROP CONSTRAINT IF EXISTS places_import_confidence_check;
+
+ALTER TABLE IF EXISTS places
+  ADD CONSTRAINT places_import_confidence_check
+  CHECK (import_confidence IN ('high', 'low'));
 
 CREATE INDEX IF NOT EXISTS places_type_id_idx ON places(type_id);
 CREATE INDEX IF NOT EXISTS places_source_location_idx ON places(source_location);
