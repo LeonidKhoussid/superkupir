@@ -281,9 +281,13 @@ export function MyRoutesPage() {
               >
                 Места
               </NavLink>
-              <a href="/#places" className={navLinkClass}>
+              <NavLink
+                to="/impressions"
+                className={({ isActive }) => `${navLinkClass} ${isActive ? navLinkActive : ''}`}
+                end
+              >
                 Впечатления
-              </a>
+              </NavLink>
               <NavLink
                 to="/myroutes"
                 className={({ isActive }) => `${navLinkClass} ${isActive ? navLinkActive : ''}`}
@@ -347,13 +351,16 @@ export function MyRoutesPage() {
                 >
                   Места
                 </NavLink>
-                <a
-                  href="/#places"
-                  className="block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue"
+                <NavLink
+                  to="/impressions"
+                  end
                   onClick={() => setMobileNavOpen(false)}
+                  className={({ isActive }) =>
+                    `block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue ${isActive ? `bg-sky-50 ${navLinkActive}` : ''}`
+                  }
                 >
                   Впечатления
-                </a>
+                </NavLink>
                 <NavLink
                   to="/myroutes"
                   end

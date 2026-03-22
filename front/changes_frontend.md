@@ -4,6 +4,36 @@
 
 ---
 
+## [2026-03-22] - «Впечатления» `/impressions`: вкладка «Мои посты» — публикация из сохранённого маршрута (POST /posts)
+
+**Type:** feature (create post from owned route)
+
+**What changed:**
+- **`features/posts/postsApi.ts`:** **`createPost(token, { content, image_urls?, title? })`** — **`POST /posts`** (Bearer), тело в **`snake_case`** как у **`createPostSchema`** на бэке.
+- **`components/ImpressionsMyPostsTab.tsx`:** форма «Мои посты»: **`GET /routes?scope=owned`** через **`fetchAllUserRoutes`**, выбор маршрута, **`GET /routes/:id`** для остановок и превью, **`image_urls`** из **`getPrimaryDisplayPhotoUrl`** по порядку остановок (до 20 уникальных URL), textarea, **`Опубликовать`**, список **`GET /posts?mine=true`**; гость — **`requestAuthModalOpen`**; пустой список маршрутов — CTA на **`/places`** / **`/myroutes`**.
+- **`pages/ImpressionsPage.tsx`:** левая мини-навигация — переключение **«Маршруты пользователей»** / **«Мои посты»**; лента общих постов не трогается при смене вкладки; после успешного создания поста — **`reloadKey`** для обновления ленты.
+- **`memory_frontend.md`**, **`changes_frontend.md`**.
+
+**Testing:** `cd front && npm run lint`, `npm run build` — два прохода подряд, успешно.
+
+---
+
+## [2026-03-22] - Страница «Впечатления» `/impressions`: лента постов, мини-навигация, «Построить маршрут» через POST /routes
+
+**Type:** feature (posts feed + route from post)
+
+**What changed:**
+- **`features/posts/postsApi.ts`:** **`GET /posts`**, парсинг **`PostsListResult`** / **`PublicPostItem`** (snake_case: **`image_urls`**, **`is_guide`**, даты строками).
+- **`features/posts/postPlaceHydration.ts`:** индекс URL фото каталога → **`PublicPlace`**; слоты по **`image_urls`** поста; **`orderedUniquePlaceIdsFromSlots`**. В контракте поста нет **`place_ids`** — сопоставление по URL **`photo_urls`** мест.
+- **`pages/ImpressionsPage.tsx`:** шапка как у каталога/моих туров; слева мини-блок (**«Маршруты пользователей»** активен; **«Готовые маршруты»**, **«Мои посты»** — заглушки); **«Новые посты»**; карточка: email, по одному фото на URL в посте, текст (**`whitespace-pre-wrap`**), список точек, **`Построить маршрут`** → **`createRouteFromSelection`** + **`navigate(/routes/:id)`**; гость → **`requestAuthModalOpen`**; **`fetchPostsList`** + **`fetchAllPlaces()`**; фильтр **`!author.is_guide`** без query **`guide=false`** (из‑за **`z.coerce.boolean`** и строки `"false"`).
+- **`App.tsx`:** **`/impressions`**.
+- **`LandingPage`**, **`PlacesCatalogPage`**, **`MyRoutesPage`:** **«Впечатления»** → **`/impressions`**.
+- **`memory_frontend.md`**, **`changes_frontend.md`**.
+
+**Testing:** `cd front && npm run lint`, `npm run build` — два прохода подряд, успешно.
+
+---
+
 ## [2026-03-22] - Совместное редактирование маршрута по ссылке (одна запись, revision, UX)
 
 **Type:** feature (collaborative share/edit, conflict handling)

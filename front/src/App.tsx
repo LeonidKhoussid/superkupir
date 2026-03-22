@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuthStore } from './features/auth/authStore'
 import { QuizPage } from './features/quiz/QuizPage'
+import { ImpressionsPage } from './pages/ImpressionsPage'
 import { LandingPage } from './pages/LandingPage'
 import { MyRoutesPage } from './pages/MyRoutesPage'
 import { PlaceDetailPage } from './pages/PlaceDetailPage'
@@ -32,6 +33,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/myroutes" element={<MyRoutesPage />} />
+        <Route path="/impressions" element={<ImpressionsPage />} />
         <Route path="/places" element={<PlacesCatalogPage />} />
         <Route path="/places/:id" element={<PlaceDetailPage />} />
         <Route path="/routes/shared/:token" element={<RouteSharedPage />} />

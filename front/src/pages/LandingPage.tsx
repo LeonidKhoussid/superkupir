@@ -38,9 +38,9 @@ export function LandingPage() {
             <Link to="/places" className="hover:opacity-90">
               Места
             </Link>
-            <a href="#places" className="hover:opacity-90">
+            <Link to="/impressions" className="hover:opacity-90">
               Впечатления
-            </a>
+            </Link>
             <Link to="/myroutes" className="hover:opacity-90">
               Мои Туры
             </Link>
