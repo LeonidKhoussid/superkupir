@@ -4,6 +4,62 @@
 
 ---
 
+## [2026-03-21] - `/routes/:id`: прямое редактирование остановок на странице (добавить / убрать / порядок), синхронизация карты
+
+**Type:** feature (route planner UX)
+
+**What changed:**
+- **`features/routes/editableRouteStops.ts`:** тип **`EditableRouteStop`**, **`stopsFromUserRoute`**, **`newClientRouteStop`**, **`editableStopsToRouteRows`** — мост к блокам отелей/ресторанов.
+- **`components/RouteAddStopModal.tsx`:** модалка (портал, Escape, **`body` overflow**): **`fetchAllPlaces({ pageLimit: 24 })`**, клиентский поиск, скрытие уже добавленных **`place_id`**, кнопка «Повторить» при ошибке.
+- **`pages/RouteDetailPage.tsx`:** локальное состояние **`editorStops`** + **`baselineSig`** (несохранённые правки); секция **«Ключевые точки маршрута»** — **Убрать**, **↑ / ↓**, ссылка на деталь места; **«Добавить остановку»**; **«Сбросить к загруженному»** при **`isDirty`**; карта и счётчик остановок из **`editorStops`**; отели/еда пересчитываются с текущего списка; убран текст про невозможность редактирования на странице; явно указано, что правки **только в сессии вкладки**, **без сохранения на сервер**.
+- **`front/memory_frontend.md`**, **`front/changes_frontend.md`**.
+
+**Why it changed:**
+- Пользователь должен менять маршрут на самой странице просмотра, без обязательного ухода в каталог.
+
+**Files touched:**
+- `front/src/features/routes/editableRouteStops.ts`
+- `front/src/components/RouteAddStopModal.tsx`
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- Проход 1: `cd front && npm run lint`, `cd front && npm run build` — успешно.
+- Проход 2: `cd front && npm run lint && npm run build` — успешно.
+
+---
+
+## [2026-03-21] - `/routes/:id`: обзор маршрута — карта Яндекса, маршрут по дорогам, блоки квиза / остановок / отелей и еды
+
+**Type:** feature (route review / result page)
+
+**What changed:**
+- **`src/lib/yandexMapsLoader.ts`:** общая загрузка скрипта Maps 2.1, **`getYMaps`**, **`loadYandexMaps2`**, константы центра/зума, **`escapeHtmlForYandexBalloon`**.
+- **`components/PlacesYandexMap.tsx`:** переведён на **`yandexMapsLoader`** (без дублирования загрузчика).
+- **`components/RouteYandexMap.tsx`:** карта маршрута — нумерованные метки по порядку остановок, **`multiRouter.MultiRoute`** (авто по дорогам) с **`requestfail` → Polyline** между точками; **`fullscreenControl`**.
+- **`features/routes/routePlaceGroups.ts`:** разбиение точек маршрута на «гостиницы» (**`hotel`**, **`guest_house`**, **`recreation_base`**) и «поесть» (**`restaurant`**, **`gastro`**) по **`type_slug`**.
+- **`pages/RouteDetailPage.tsx`:** layout **карта слева** (липкая на `lg`), **панель справа** — заголовок, CTA **«Изменить остановки»** → **`/places`**, блок **параметры из квиза** только при **`creation_mode === 'quiz'`** и заполненном **`useQuizStore`** (люди, сезоны, бюджет, вид отдыха, дни); иначе для квиз-маршрута — подсказка со ссылкой на **`/quiz/1`**; секции **остановки**, **где остановиться**, **поесть**; skip-link, шапка с логотипом и **`LoginButton`**.
+- **`front/memory_frontend.md`**, **`front/changes_frontend.md`**.
+
+**Why it changed:**
+- Экран сохранённого маршрута должен совпадать с продуктовым сценарием: карта, линия маршрута, сводка и точки, согласованность с корзиной/каталогом без правок backend.
+
+**Files touched:**
+- `front/src/lib/yandexMapsLoader.ts`
+- `front/src/components/PlacesYandexMap.tsx`
+- `front/src/components/RouteYandexMap.tsx`
+- `front/src/features/routes/routePlaceGroups.ts`
+- `front/src/pages/RouteDetailPage.tsx`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+**Testing:**
+- Проход 1: `cd front && npm run lint`, `cd front && npm run build` — успешно.
+- Проход 2: `cd front && npm run lint && npm run build` — успешно.
+
+---
+
 ## [2026-03-21] - Квиз: иллюстрация с CDN (quizImg1.png)
 
 **Type:** content / assets

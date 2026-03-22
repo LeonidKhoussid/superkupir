@@ -1,86 +1,13 @@
 import { type RefObject, useEffect, useRef, useState } from 'react'
 import { getPlaceLatLon, type PublicPlace } from '../features/places/placesApi'
-
-/** Центр Краснодара по умолчанию [широта, долгота] для Yandex Maps 2.1 */
-const DEFAULT_CENTER: [number, number] = [45.0355, 38.9753]
-const DEFAULT_ZOOM = 8
-
-/** Runtime Yandex Maps 2.1 (подключается скриптом с CDN, типов в проекте нет). */
-type YMapsRuntime = {
-  Map: new (el: HTMLElement, opts: Record<string, unknown>) => YMapInstance
-  Placemark: new (
-    coords: number[],
-    props?: Record<string, unknown>,
-    opts?: Record<string, unknown>,
-  ) => YPlacemarkInstance
-}
-
-type YMapInstance = {
-  destroy: () => void
-  container?: { fitToViewport?: () => void }
-  geoObjects: {
-    removeAll: () => void
-    add: (o: unknown) => void
-    getBounds: () => number[][] | null
-  }
-  setCenter: (c: number[], z?: number, opts?: Record<string, unknown>) => void
-  setBounds: (b: number[][], opts?: Record<string, unknown>) => void
-}
-
-type YPlacemarkInstance = {
-  events: { add: (ev: string, fn: () => void) => void }
-}
-
-function getYMaps(): YMapsRuntime | undefined {
-  return (window as unknown as { ymaps?: YMapsRuntime }).ymaps
-}
-
-function escapeHtml(text: string): string {
-  const d = document.createElement('div')
-  d.textContent = text
-  return d.innerHTML
-}
-
-function loadYandexMaps2(apiKey: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const ww = () =>
-      window as Window & {
-        ymaps?: { ready: (cb: () => void) => void }
-      }
-
-    if (ww().ymaps?.ready) {
-      ww().ymaps!.ready(() => resolve())
-      return
-    }
-
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[src*="api-maps.yandex.ru/2.1"]',
-    )
-    if (existing) {
-      const done = () => {
-        if (ww().ymaps?.ready) ww().ymaps!.ready(() => resolve())
-        else reject(new Error('ymaps'))
-      }
-      if ((existing as HTMLScriptElement & { complete?: boolean }).complete) {
-        done()
-      } else {
-        existing.addEventListener('load', done)
-        existing.addEventListener('error', () => reject(new Error('script')))
-      }
-      return
-    }
-
-    const s = document.createElement('script')
-    s.src = `https://api-maps.yandex.ru/2.1/?apikey=${encodeURIComponent(apiKey)}&lang=ru_RU`
-    s.async = true
-    s.onload = () => {
-      if (ww().ymaps?.ready) ww().ymaps!.ready(() => resolve())
-      else reject(new Error('ymaps'))
-    }
-    s.onerror = () => reject(new Error('load'))
-    document.head.appendChild(s)
-  })
-}
+import {
+  escapeHtmlForYandexBalloon,
+  getYMaps,
+  loadYandexMaps2,
+  YANDEX_DEFAULT_CENTER,
+  YANDEX_DEFAULT_ZOOM,
+  type YMapInstance,
+} from '../lib/yandexMapsLoader'
 
 type Props = {
   places: PublicPlace[]
@@ -140,8 +67,8 @@ export function PlacesYandexMap({
         setMapError(null)
 
         const map = new ymapsGlobal.Map(containerRef.current, {
-          center: DEFAULT_CENTER,
-          zoom: DEFAULT_ZOOM,
+          center: YANDEX_DEFAULT_CENTER,
+          zoom: YANDEX_DEFAULT_ZOOM,
           controls: ['zoomControl'],
         })
         mapRef.current = map
@@ -173,7 +100,7 @@ export function PlacesYandexMap({
       const placemark = new ymapsGlobal.Placemark(
         ll,
         {
-          balloonContent: `<div style="padding:4px 2px;font:14px system-ui">${escapeHtml(p.name)}</div>`,
+          balloonContent: `<div style="padding:4px 2px;font:14px system-ui">${escapeHtmlForYandexBalloon(p.name)}</div>`,
           hintContent: p.name,
         },
         { preset: 'islands#blueIcon' },
@@ -191,7 +118,7 @@ export function PlacesYandexMap({
         map.setBounds(bounds, { checkZoomRange: true, zoomMargin: 28 })
       }
     } else {
-      map.setCenter(DEFAULT_CENTER, DEFAULT_ZOOM)
+      map.setCenter(YANDEX_DEFAULT_CENTER, YANDEX_DEFAULT_ZOOM)
     }
   }, [places, mapReady, onMarkerPlaceClick])
 
