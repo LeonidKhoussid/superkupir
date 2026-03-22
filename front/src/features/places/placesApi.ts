@@ -1,7 +1,9 @@
 /**
  * Клиент для публичных read-only эндпоинтов мест (см. back/memory_backend.md: GET /places, GET /places/:id).
- * База URL совпадает с auth: VITE_API_BASE_URL или http://localhost:3000
+ * База URL: VITE_API_BASE_URL или тот же хост, что у страницы, порт 3000 (см. getApiBaseUrl).
  */
+
+import { getApiBaseUrl } from '../../lib/apiBaseUrl'
 
 export class PlacesApiError extends Error {
   readonly status?: number
@@ -168,10 +170,7 @@ export const PLACES_CATALOG_FETCH_LIMIT = 24
 /** Размер фоновой догрузки каталога и модалки добавления остановок. */
 export const PLACES_BACKGROUND_FETCH_LIMIT = 100
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000').replace(
-  /\/$/,
-  '',
-)
+const apiBaseUrl = getApiBaseUrl()
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null

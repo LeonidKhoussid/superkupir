@@ -2,12 +2,10 @@
  * Авторизованные эндпоинты маршрутов: GET /routes, POST /routes, GET /routes/:id.
  */
 
+import { getApiBaseUrl } from '../../lib/apiBaseUrl'
 import { parsePublicPlace, type PublicPlace } from '../places/placesApi'
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000').replace(
-  /\/$/,
-  '',
-)
+const apiBaseUrl = getApiBaseUrl()
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null

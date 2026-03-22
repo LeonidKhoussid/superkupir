@@ -2,12 +2,10 @@
  * Публичный каталог таксономии: GET /seasons (см. back/memory_backend.md).
  */
 
+import { getApiBaseUrl } from '../../lib/apiBaseUrl'
 import { PlacesApiError } from '../places/placesApi'
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000').replace(
-  /\/$/,
-  '',
-)
+const apiBaseUrl = getApiBaseUrl()
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
