@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { LoginButton } from '../components/LoginButton'
+import { PlacesSwipeDeck } from '../components/PlacesSwipeDeck'
 import { fetchSeasons, type CatalogSeason } from '../features/catalog/catalogApi'
 import { requestAuthModalOpen } from '../features/auth/authModalEvents'
 import { useAuthStore } from '../features/auth/authStore'
@@ -65,6 +67,35 @@ function formatDistanceKm(km: number | null | undefined): string | null {
   if (km == null || !Number.isFinite(km)) return null
   if (km < 1) return `${Math.round(km * 1000)} м от якоря`
   return `${km < 10 ? km.toFixed(1) : Math.round(km)} км от якоря`
+}
+
+function AnchorToastThumb({ place }: { place: PublicPlace | null | undefined }) {
+  const [broken, setBroken] = useState(false)
+  const src = place ? getPrimaryDisplayPhotoUrl(place) : ''
+
+  if (!place || !src || broken) {
+    return (
+      <div
+        className="flex size-20 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-200/80 to-sky-100 text-[11px] font-medium text-neutral-500"
+        aria-hidden
+      >
+        Фото
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative size-20 shrink-0 overflow-hidden rounded-xl bg-sky-100 ring-1 ring-sky-200/80">
+      <img
+        src={src}
+        alt=""
+        className="size-full object-cover"
+        loading="lazy"
+        decoding="async"
+        onError={() => setBroken(true)}
+      />
+    </div>
+  )
 }
 
 function CatalogCardImage({ place }: { place: PublicPlace }) {
@@ -211,6 +242,10 @@ const navLinkClass =
   'rounded-md px-1 py-1 text-[14px] font-semibold tracking-wide text-kr-blue transition hover:opacity-80 lg:text-[15px]'
 const navLinkActive = 'underline decoration-2 underline-offset-4'
 
+const SESSION_SWIPE_HINT_KEY = 'kray-places-swipe-hint-seen'
+
+const MOBILE_MAX_CSS = '(max-width: 639px)'
+
 export function PlacesCatalogPage() {
   const navigate = useNavigate()
   const token = useAuthStore((s) => s.token)
@@ -221,6 +256,14 @@ export function PlacesCatalogPage() {
   const [query, setQuery] = useState('')
   const [seasons, setSeasons] = useState<CatalogSeason[]>([])
   const [seasonsError, setSeasonsError] = useState<string | null>(null)
+
+  const swipeHintTitleId = useId()
+  const routeReviewTitleId = useId()
+  const builderToastTitleId = useId()
+  const [swipeHintOpen, setSwipeHintOpen] = useState(false)
+  const [builderToastDismissed, setBuilderToastDismissed] = useState(false)
+  const [routeReviewOpen, setRouteReviewOpen] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   const selectedIds = useRouteCartStore((s) => s.selectedIds)
   const placesById = useRouteCartStore((s) => s.placesById)
@@ -235,6 +278,8 @@ export function PlacesCatalogPage() {
 
   const addPlace = useRouteCartStore((s) => s.addPlace)
   const removePlace = useRouteCartStore((s) => s.removePlace)
+  const rejectSwipePlace = useRouteCartStore((s) => s.rejectSwipePlace)
+  const swipeRejectedIds = useRouteCartStore((s) => s.swipeRejectedIds)
   const resetBuilder = useRouteCartStore((s) => s.resetBuilder)
   const setRecommendationsLoading = useRouteCartStore((s) => s.setRecommendationsLoading)
   const setActiveSeasonId = useRouteCartStore((s) => s.setActiveSeasonId)
@@ -242,6 +287,7 @@ export function PlacesCatalogPage() {
   const setRouteCreateError = useRouteCartStore((s) => s.setRouteCreateError)
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const swipeRejectedSet = useMemo(() => new Set(swipeRejectedIds), [swipeRejectedIds])
 
   const applyFetchResult = useCallback((r: CatalogFetchResult) => {
     if (r.ok) {
@@ -270,6 +316,43 @@ export function PlacesCatalogPage() {
       cancelled = true
     }
   }, [applyFetchResult])
+
+  useEffect(() => {
+    if (phase !== 'ok') return
+    if (typeof window === 'undefined') return
+    if (!window.matchMedia(MOBILE_MAX_CSS).matches) return
+    if (sessionStorage.getItem(SESSION_SWIPE_HINT_KEY)) return
+    setSwipeHintOpen(true)
+  }, [phase])
+
+  useEffect(() => {
+    const anyOpen = swipeHintOpen || routeReviewOpen || mobileNavOpen
+    if (!anyOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [swipeHintOpen, routeReviewOpen, mobileNavOpen])
+
+  useEffect(() => {
+    if (!swipeHintOpen && !routeReviewOpen && !mobileNavOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (swipeHintOpen) {
+        sessionStorage.setItem(SESSION_SWIPE_HINT_KEY, '1')
+        setSwipeHintOpen(false)
+        return
+      }
+      if (routeReviewOpen) {
+        setRouteReviewOpen(false)
+        return
+      }
+      setMobileNavOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [swipeHintOpen, routeReviewOpen, mobileNavOpen])
 
   useEffect(() => {
     let cancelled = false
@@ -305,7 +388,14 @@ export function PlacesCatalogPage() {
     setActiveSeasonId(row?.id ?? null)
   }, [activeSeasonSlug, seasons, setActiveSeasonId])
 
-  const recSignature = selectedIds.join(',')
+  useEffect(() => {
+    if (!builderStarted) setBuilderToastDismissed(false)
+  }, [builderStarted])
+
+  const recSignature = useMemo(() => {
+    const rej = [...swipeRejectedIds].sort((a, b) => a - b).join(',')
+    return `${selectedIds.join(',')}|${rej}`
+  }, [selectedIds, swipeRejectedIds])
 
   useEffect(() => {
     if (!builderStarted || !anchorPlaceId || !activeSeasonSlug) return
@@ -313,19 +403,24 @@ export function PlacesCatalogPage() {
     const ctrl = new AbortController()
     const timer = window.setTimeout(() => {
       setRecommendationsLoading()
+      const st = useRouteCartStore.getState()
+      const exclude_place_ids = [
+        ...new Set([...st.selectedIds, ...st.swipeRejectedIds]),
+      ]
       void fetchPlaceRecommendations(
         {
           season_slug: activeSeasonSlug,
           anchor_place_id: anchorPlaceId,
-          exclude_place_ids: useRouteCartStore.getState().selectedIds,
+          exclude_place_ids,
           radius_km: 80,
           limit: 48,
         },
         { signal: ctrl.signal },
       )
         .then((res) => {
-          const cart = new Set(useRouteCartStore.getState().selectedIds)
-          const next = res.items.filter((p) => !cart.has(p.id))
+          const st = useRouteCartStore.getState()
+          const hide = new Set([...st.selectedIds, ...st.swipeRejectedIds])
+          const next = res.items.filter((p) => !hide.has(p.id))
           useRouteCartStore.getState().setRecommendationsResult(next)
         })
         .catch((e: unknown) => {
@@ -362,6 +457,18 @@ export function PlacesCatalogPage() {
     [addPlace, seasons],
   )
 
+  const handleSwipeSkip = useCallback(
+    (place: PublicPlace) => {
+      rejectSwipePlace(place.id)
+    },
+    [rejectSwipePlace],
+  )
+
+  const dismissSwipeHint = useCallback(() => {
+    sessionStorage.setItem(SESSION_SWIPE_HINT_KEY, '1')
+    setSwipeHintOpen(false)
+  }, [])
+
   const handleCreateRoute = useCallback(async () => {
     if (!token) {
       requestAuthModalOpen()
@@ -385,6 +492,7 @@ export function PlacesCatalogPage() {
         place_ids: ids,
         season_id: st.activeSeasonId ?? undefined,
       })
+      setRouteReviewOpen(false)
       resetBuilder()
       navigate(`/routes/${detail.id}`)
     } catch (e) {
@@ -406,6 +514,11 @@ export function PlacesCatalogPage() {
     [filteredCatalog],
   )
 
+  const sortedCatalogVisible = useMemo(
+    () => sortedCatalogOnly.filter((p) => !swipeRejectedSet.has(p.id)),
+    [sortedCatalogOnly, swipeRejectedSet],
+  )
+
   const selectedPlacesOrdered = useMemo(
     () =>
       selectedIds
@@ -416,8 +529,8 @@ export function PlacesCatalogPage() {
 
   const filteredRecommendations = useMemo(() => {
     const q = filterPlacesByQuery(recommendationItems, query)
-    return q.filter((p) => !selectedIdSet.has(p.id))
-  }, [recommendationItems, query, selectedIdSet])
+    return q.filter((p) => !selectedIdSet.has(p.id) && !swipeRejectedSet.has(p.id))
+  }, [recommendationItems, query, selectedIdSet, swipeRejectedSet])
 
   const sortedRecommendations = useMemo(
     () => orderPlacesByCatalogImagePriority(filteredRecommendations),
@@ -430,18 +543,72 @@ export function PlacesCatalogPage() {
   )
 
   const catalogSupplement = useMemo(() => {
-    return sortedCatalogOnly.filter((p) => !selectedIdSet.has(p.id) && !recIdSet.has(p.id))
-  }, [sortedCatalogOnly, selectedIdSet, recIdSet])
+    return sortedCatalogVisible.filter((p) => !selectedIdSet.has(p.id) && !recIdSet.has(p.id))
+  }, [sortedCatalogVisible, selectedIdSet, recIdSet])
 
-  const anchorName =
-    anchorPlaceId != null ? placesById[String(anchorPlaceId)]?.name ?? null : null
-
-  const canCreateRoute = selectedIds.length >= 1 && !routeCreateLoading
+  const sortedRecommendationsByDistance = useMemo(() => {
+    const list = [...sortedRecommendations]
+    list.sort((a, b) => {
+      const da = (a as PublicPlaceRecommendation).distance_km
+      const db = (b as PublicPlaceRecommendation).distance_km
+      if (da != null && db != null && da !== db) return da - db
+      if (da != null && db == null) return -1
+      if (da == null && db != null) return 1
+      return 0
+    })
+    return list
+  }, [sortedRecommendations])
 
   const showBuilderUi = builderStarted && phase === 'ok'
 
+  const mobileDeckPlaces = useMemo(() => {
+    const seen = new Set<number>()
+    const out: PublicPlace[] = []
+    if (showBuilderUi) {
+      for (const p of sortedRecommendationsByDistance) {
+        if (seen.has(p.id)) continue
+        seen.add(p.id)
+        out.push(p)
+      }
+      for (const p of catalogSupplement) {
+        if (seen.has(p.id)) continue
+        seen.add(p.id)
+        out.push(p)
+      }
+      return out
+    }
+    for (const p of sortedCatalogVisible) {
+      if (selectedIdSet.has(p.id)) continue
+      if (seen.has(p.id)) continue
+      seen.add(p.id)
+      out.push(p)
+    }
+    return out
+  }, [
+    showBuilderUi,
+    sortedRecommendationsByDistance,
+    catalogSupplement,
+    sortedCatalogVisible,
+    selectedIdSet,
+  ])
+
+  const anchorName =
+    anchorPlaceId != null ? placesById[String(anchorPlaceId)]?.name ?? null : null
+  const anchorPlace =
+    anchorPlaceId != null ? placesById[String(anchorPlaceId)] ?? null : null
+
+  const showBuilderToast = showBuilderUi && !builderToastDismissed
+
+  const canCreateRoute = selectedIds.length >= 1 && !routeCreateLoading
+
   return (
-    <div className="min-h-dvh bg-[#e8f4fc] pb-36 text-neutral-900">
+    <div
+      className={`min-h-dvh bg-[#e8f4fc] text-neutral-900 ${
+        phase === 'ok'
+          ? 'max-sm:flex max-sm:h-dvh max-sm:flex-col max-sm:overflow-hidden max-sm:pb-0 sm:pb-36'
+          : 'pb-36'
+      }`}
+    >
       <a
         href="#catalog-main"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-kr-blue"
@@ -450,8 +617,8 @@ export function PlacesCatalogPage() {
       </a>
 
       <header className="sticky top-0 z-30 border-b border-sky-200/60 bg-white/90 shadow-sm shadow-sky-900/5 backdrop-blur-md">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-3 px-5 py-4 sm:px-8 lg:px-14">
-          <div className="flex items-center justify-between gap-4">
+        <div className="mx-auto max-w-[1440px] px-3 py-2 sm:px-6 sm:py-3 lg:px-12 lg:py-3">
+          <div className="flex items-center justify-between gap-2 sm:gap-4">
             <Link
               to="/"
               className="flex shrink-0 items-center"
@@ -462,12 +629,12 @@ export function PlacesCatalogPage() {
                 alt="Край Тур"
                 width={174}
                 height={81}
-                className="h-12 w-auto object-contain object-left sm:h-10 lg:h-11"
+                className="h-9 w-auto object-contain object-left sm:h-10 lg:h-11"
                 decoding="async"
               />
             </Link>
             <nav
-              className="flex flex-wrap justify-center ml-32 gap-x-5 gap-y-1 text-kr-blue sm:gap-x-8 lg:gap-x-14"
+              className="hidden flex-wrap items-center justify-center gap-x-6 gap-y-1 text-kr-blue lg:gap-x-10 sm:flex"
               aria-label="Основная навигация"
             >
               <NavLink
@@ -486,17 +653,87 @@ export function PlacesCatalogPage() {
                 Как это работает
               </a>
             </nav>
-            <LoginButton variant="on-catalog" />
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                aria-label="Открыть меню"
+                aria-expanded={mobileNavOpen}
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-sky-200/90 bg-white text-kr-blue shadow-sm sm:hidden"
+              >
+                <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                  <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
+                </svg>
+              </button>
+              <LoginButton variant="on-catalog" className="!min-w-0 px-4 text-[13px] sm:!min-w-[120px] sm:px-8 sm:text-[15px]" />
+            </div>
           </div>
         </div>
       </header>
 
-      <main id="catalog-main" className="mx-auto max-w-[1440px] px-5 py-10 sm:px-8 lg:px-14 lg:py-12">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
-          <h1 className="font-display text-left text-[clamp(1.5rem,4vw,2.35rem)] font-bold uppercase leading-tight tracking-[0.08em] text-kr-blue">
+      {mobileNavOpen
+        ? createPortal(
+            <div className="fixed inset-0 z-[95] sm:hidden">
+              <button
+                type="button"
+                className="absolute inset-0 bg-black/45"
+                aria-label="Закрыть меню"
+                onClick={() => setMobileNavOpen(false)}
+              />
+              <nav
+                className="absolute right-0 top-0 flex h-full w-[min(88vw,280px)] flex-col gap-1 border-l border-sky-200 bg-white py-4 pl-4 pr-3 shadow-xl"
+                aria-label="Меню навигации"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="mb-3 flex justify-end pr-1">
+                  <button
+                    type="button"
+                    onClick={() => setMobileNavOpen(false)}
+                    aria-label="Закрыть"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-[1.5rem] leading-none text-neutral-500 hover:bg-neutral-100"
+                  >
+                    ×
+                  </button>
+                </div>
+                <NavLink
+                  to="/places"
+                  end
+                  onClick={() => setMobileNavOpen(false)}
+                  className={({ isActive }) =>
+                    `block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue ${isActive ? 'bg-sky-50 ' + navLinkActive : ''}`
+                  }
+                >
+                  Места
+                </NavLink>
+                <a
+                  href="/#places"
+                  className="block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue"
+                  onClick={() => setMobileNavOpen(false)}
+                >
+                  Впечатления
+                </a>
+                <a
+                  href="/#how"
+                  className="block rounded-lg px-3 py-3 text-[15px] font-semibold text-kr-blue"
+                  onClick={() => setMobileNavOpen(false)}
+                >
+                  Как это работает
+                </a>
+              </nav>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      <main
+        id="catalog-main"
+        className="mx-auto max-w-[1440px] px-5 py-10 sm:px-8 lg:px-14 lg:py-12 max-sm:flex max-sm:min-h-0 max-sm:flex-1 max-sm:flex-col max-sm:overflow-hidden max-sm:px-3 max-sm:py-2"
+      >
+        <div className="flex shrink-0 flex-col gap-3 sm:gap-6 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
+          <h1 className="sr-only font-display text-left text-[clamp(1.5rem,4vw,2.35rem)] font-bold uppercase leading-tight tracking-[0.08em] text-kr-blue sm:not-sr-only sm:block">
             Места Краснодарского края
           </h1>
-          <div className="relative w-full shrink-0 lg:max-w-md">
+          <div className="relative w-full shrink-0 lg:max-w-md ">
             <label htmlFor="places-catalog-search" className="sr-only">
               Поиск по названию
             </label>
@@ -507,7 +744,7 @@ export function PlacesCatalogPage() {
               placeholder="Поиск по названию"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full rounded-full border border-sky-200/90 bg-white py-3 pl-5 pr-12 text-[15px] text-neutral-800 shadow-inner shadow-sky-900/5 outline-none ring-kr-blue/30 transition placeholder:text-neutral-400 focus:border-kr-blue focus:ring-2"
+              className="w-full rounded-full border border-sky-200/90 bg-white py-2.5 pl-4 pr-11 text-[14px] text-neutral-800 shadow-inner shadow-sky-900/5 outline-none ring-kr-blue/30 transition placeholder:text-neutral-400 focus:border-kr-blue focus:ring-2 sm:py-3 sm:pl-5 sm:pr-12 sm:text-[15px]"
             />
             <span
               className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-kr-blue/70"
@@ -529,46 +766,32 @@ export function PlacesCatalogPage() {
         </div>
 
         {seasonsError ? (
-          <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-[13px] text-amber-900">
+          <p className="mt-2 shrink-0 rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-[12px] text-amber-900 sm:mt-6 sm:rounded-xl sm:px-4 sm:py-3 sm:text-[13px]">
             {seasonsError}
           </p>
         ) : null}
 
-        {showBuilderUi ? (
-          <div className="mt-8 rounded-2xl border border-sky-200/90 bg-white/95 px-5 py-4 shadow-sm shadow-sky-900/5">
-            <p className="font-display text-[13px] font-bold uppercase tracking-wider text-kr-blue">
-              Конструктор маршрута
-            </p>
-            {!activeSeasonSlug ? (
-              <p className="mt-2 text-[13px] font-medium text-amber-800">
-                Сезон для подбора пока не определён (нет данных с сервера или у места нет сезона). Каталог
-                ниже всё равно доступен — добавляйте точки вручную.
-              </p>
-            ) : null}
-            <p className="mt-2 text-[14px] leading-relaxed text-neutral-700">
-              Подобрали места рядом с якорем
-              {anchorName ? (
-                <>
-                  {' '}
-                  <span className="font-semibold text-neutral-900">«{anchorName}»</span>
-                </>
-              ) : null}
-              {activeSeasonSlug ? (
-                <>
-                  {' '}
-                  в сезоне <span className="font-semibold text-neutral-900">{activeSeasonSlug}</span>
-                </>
-              ) : null}
-              . Добавляйте точки в маршрут и нажмите «Создать маршрут».
-            </p>
-            {recommendationsStatus === 'error' && recommendationsError ? (
-              <p className="mt-3 text-[13px] text-red-700">{recommendationsError}</p>
-            ) : null}
-          </div>
+        {showBuilderUi &&
+        builderToastDismissed &&
+        recommendationsStatus === 'error' &&
+        recommendationsError ? (
+          <p className="mt-2 shrink-0 rounded-lg border border-red-200 bg-red-50/90 px-3 py-2 text-[12px] text-red-800 sm:mt-6 sm:rounded-xl sm:px-4 sm:py-3 sm:text-[13px]">
+            {recommendationsError}
+          </p>
         ) : null}
 
-        <div className="mt-10 lg:mt-12">
-          {phase === 'loading' ? <SkeletonGrid /> : null}
+        <div className="mt-3 min-h-0 flex-1 flex flex-col sm:mt-10 lg:mt-12">
+          {phase === 'loading' ? (
+            <>
+              <div className="py-16 text-center sm:hidden">
+                <div className="mx-auto size-10 animate-spin rounded-full border-2 border-kr-blue border-t-transparent" />
+                <p className="mt-4 text-[14px] text-neutral-600">Загружаем каталог…</p>
+              </div>
+              <div className="hidden sm:block">
+                <SkeletonGrid />
+              </div>
+            </>
+          ) : null}
 
           {phase === 'error' ? (
             <div className="rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
@@ -589,14 +812,25 @@ export function PlacesCatalogPage() {
             </p>
           ) : null}
 
-          {phase === 'ok' && !showBuilderUi && sortedCatalogOnly.length === 0 ? (
+          {phase === 'ok' && !showBuilderUi && sortedCatalogVisible.length === 0 ? (
             <p className="rounded-2xl border border-sky-200/80 bg-white/90 px-6 py-12 text-center text-[15px] text-neutral-600">
               Ничего не найдено. Попробуйте изменить запрос.
             </p>
           ) : null}
 
+          {phase === 'ok' ? (
+            <div className="flex min-h-0 flex-1 flex-col sm:hidden">
+              <PlacesSwipeDeck
+                deck={mobileDeckPlaces}
+                recommendationsLoading={showBuilderUi && recommendationsStatus === 'loading'}
+                onSkip={handleSwipeSkip}
+                onLike={handleAddToRoute}
+              />
+            </div>
+          ) : null}
+
           {phase === 'ok' && showBuilderUi ? (
-            <div className="flex flex-col gap-12">
+            <div className="hidden sm:flex sm:flex-col sm:gap-12">
               {selectedPlacesOrdered.length > 0 ? (
                 <section aria-labelledby="route-selected-heading">
                   <h2
@@ -693,9 +927,9 @@ export function PlacesCatalogPage() {
             </div>
           ) : null}
 
-          {phase === 'ok' && !showBuilderUi && sortedCatalogOnly.length > 0 ? (
-            <ul className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {sortedCatalogOnly.map((place) => (
+          {phase === 'ok' && !showBuilderUi && sortedCatalogVisible.length > 0 ? (
+            <ul className="hidden gap-6 sm:grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {sortedCatalogVisible.map((place) => (
                 <li key={place.id}>
                   <CatalogPlaceCard
                     place={place}
@@ -711,10 +945,43 @@ export function PlacesCatalogPage() {
 
       {phase === 'ok' && builderStarted ? (
         <aside
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-sky-200/80 bg-white/95 px-4 py-4 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-md sm:px-8"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-sky-200/80 bg-white/95 shadow-[0_-8px_30px_rgba(15,23,42,0.08)] backdrop-blur-md"
           aria-label="Корзина маршрута"
         >
-          <div className="mx-auto flex max-w-[1440px] flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
+          <div className="mx-auto max-w-[1440px] sm:hidden">
+            <div className="flex flex-col gap-2 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-display text-[11px] font-bold uppercase tracking-wider text-kr-blue">
+                  В маршруте: {selectedIds.length}{' '}
+                  {selectedIds.length === 1 ? 'место' : selectedIds.length < 5 ? 'места' : 'мест'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setRouteReviewOpen(true)}
+                  className="font-display inline-flex min-h-10 shrink-0 items-center justify-center rounded-full bg-kr-blue px-4 text-[11px] font-bold uppercase tracking-wide text-white shadow-md shadow-kr-blue/25"
+                >
+                  к маршруту
+                </button>
+              </div>
+              {routeCreateError ? (
+                <p className="text-[11px] text-red-700">{routeCreateError}</p>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => resetBuilder()}
+                className="font-display min-h-10 rounded-full border border-sky-300 px-4 text-[11px] font-bold uppercase tracking-wide text-neutral-600"
+              >
+                Сбросить конструктор
+              </button>
+              {!token ? (
+                <p className="text-center text-[10px] leading-snug text-neutral-500">
+                  Чтобы сохранить маршрут, войдите — кнопка «Войти» в шапке.
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="mx-auto hidden max-w-[1440px] flex-col gap-4 px-4 py-4 sm:flex lg:flex-row lg:items-center lg:justify-between lg:gap-6 sm:px-8">
             <div className="min-w-0 flex-1">
               <p className="font-display text-[12px] font-bold uppercase tracking-wider text-kr-blue">
                 Ваш маршрут · {selectedIds.length}{' '}
@@ -761,12 +1028,240 @@ export function PlacesCatalogPage() {
             </div>
           </div>
           {!token ? (
-            <p className="mx-auto mt-2 max-w-[1440px] text-center text-[11px] text-neutral-500">
+            <p className="mx-auto hidden max-w-[1440px] pb-3 text-center text-[11px] text-neutral-500 sm:block">
               Чтобы сохранить маршрут, войдите в аккаунт — откроется окно входа по кнопке выше.
             </p>
           ) : null}
         </aside>
       ) : null}
+
+      {showBuilderToast
+        ? createPortal(
+            <div
+              className="pointer-events-none fixed inset-x-0 top-[4.25rem] z-[45] flex justify-center px-3 sm:inset-x-auto sm:right-5 sm:top-24 sm:justify-end"
+              role="region"
+              aria-labelledby={builderToastTitleId}
+            >
+              <div className="pointer-events-auto w-full max-w-lg rounded-2xl border border-sky-200/90 bg-white/98 px-4 py-3 shadow-[0_18px_50px_-12px_rgba(15,23,42,0.18)] backdrop-blur-sm sm:max-w-sm">
+                <div className="flex gap-3">
+                  <AnchorToastThumb place={anchorPlace} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p
+                        id={builderToastTitleId}
+                        className="font-display text-[12px] font-bold uppercase tracking-wider text-kr-blue"
+                      >
+                        Конструктор маршрута
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setBuilderToastDismissed(true)}
+                        aria-label="Скрыть подсказку конструктора"
+                        className="inline-flex min-h-9 min-w-9 shrink-0 -translate-y-1 items-center justify-center rounded-full text-[1.35rem] leading-none text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kr-blue"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    {!activeSeasonSlug ? (
+                      <p className="mt-2 text-[12px] font-medium leading-snug text-amber-800">
+                        Сезон для подбора пока не определён. Каталог доступен — добавляйте точки вручную.
+                      </p>
+                    ) : null}
+                    <p className="mt-2 text-[13px] leading-snug text-neutral-700">
+                      Подобрали места рядом с якорем
+                      {anchorName ? (
+                        <>
+                          {' '}
+                          <span className="font-semibold text-neutral-900">«{anchorName}»</span>
+                        </>
+                      ) : null}
+                      {activeSeasonSlug ? (
+                        <>
+                          {' '}
+                          в сезоне{' '}
+                          <span className="font-semibold text-neutral-900">{activeSeasonSlug}</span>
+                        </>
+                      ) : null}
+                      .{' '}
+                      <span className="sm:hidden">
+                        Добавляйте точки свайпом вправо, затем нажмите «к маршруту» внизу — там список и
+                        кнопка сохранения.
+                      </span>
+                      <span className="hidden sm:inline">
+                        Добавляйте точки в маршрут и нажмите «Создать маршрут».
+                      </span>
+                    </p>
+                    {recommendationsStatus === 'error' && recommendationsError ? (
+                      <p className="mt-2 text-[12px] leading-snug text-red-700">{recommendationsError}</p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {swipeHintOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[100] flex items-end justify-center bg-black/55 p-4 pb-8 sm:items-center sm:pb-4"
+              role="presentation"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) dismissSwipeHint()
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={swipeHintTitleId}
+                className="w-full max-w-[400px] rounded-2xl bg-white p-5 shadow-2xl sm:p-6"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h2
+                    id={swipeHintTitleId}
+                    className="font-display text-[1.1rem] font-bold uppercase leading-snug tracking-wide text-kr-blue sm:text-[1.2rem]"
+                  >
+                    Свайп по карточкам
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={dismissSwipeHint}
+                    aria-label="Закрыть подсказку"
+                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-[1.5rem] leading-none text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kr-blue"
+                  >
+                    ×
+                  </button>
+                </div>
+                <ul className="mt-5 space-y-3 text-[15px] leading-relaxed text-neutral-700">
+                  <li>
+                    <span className="font-semibold text-neutral-900">Влево</span> — пропустить место (не в
+                    маршрут).
+                  </li>
+                  <li>
+                    <span className="font-semibold text-neutral-900">Вправо</span> — добавить в маршрут /
+                    избранное подборки.
+                  </li>
+                </ul>
+                <p className="mt-4 text-[13px] text-neutral-500">
+                  На карточке показывается главное фото места.
+                </p>
+                <button
+                  type="button"
+                  onClick={dismissSwipeHint}
+                  className="font-display mt-6 min-h-12 w-full rounded-full bg-kr-blue text-[14px] font-bold uppercase tracking-wide text-white shadow-md shadow-kr-blue/25"
+                >
+                  Понятно
+                </button>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {routeReviewOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[100] flex items-end justify-center bg-black/55 p-0 sm:p-4 sm:pb-8"
+              role="presentation"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setRouteReviewOpen(false)
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={routeReviewTitleId}
+                className="flex max-h-[min(92dvh,720px)] w-full max-w-lg flex-col rounded-t-2xl bg-white shadow-2xl sm:max-h-[85vh] sm:rounded-2xl"
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="flex shrink-0 items-start justify-between gap-3 border-b border-sky-100 px-5 py-4">
+                  <h2
+                    id={routeReviewTitleId}
+                    className="font-display pr-2 text-[1.05rem] font-bold uppercase leading-snug tracking-wide text-kr-blue"
+                  >
+                    Ваш маршрут
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setRouteReviewOpen(false)}
+                    aria-label="Закрыть"
+                    className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-[1.5rem] leading-none text-neutral-500 hover:bg-neutral-100"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                  {selectedPlacesOrdered.length === 0 ? (
+                    <p className="text-[15px] text-neutral-600">
+                      Пока нет точек. Свайпните карточку <span className="font-semibold">вправо</span>, чтобы
+                      добавить место в маршрут.
+                    </p>
+                  ) : (
+                    <ol className="space-y-3">
+                      {selectedPlacesOrdered.map((p, idx) => (
+                        <li
+                          key={`rv-${p.id}`}
+                          className="flex items-start gap-3 rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-3"
+                        >
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-kr-blue/15 text-[13px] font-bold text-kr-blue">
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[14px] font-semibold text-neutral-900">{p.name}</p>
+                            {p.source_location ? (
+                              <p className="mt-0.5 line-clamp-2 text-[12px] text-neutral-500">
+                                {p.source_location}
+                              </p>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removePlace(p.id)}
+                            className="shrink-0 rounded-full px-2 py-2 text-[13px] font-medium text-red-600 hover:bg-red-50"
+                            aria-label={`Убрать ${p.name}`}
+                          >
+                            Убрать
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  {routeCreateError ? (
+                    <p className="mt-4 text-[13px] text-red-700">{routeCreateError}</p>
+                  ) : null}
+                </div>
+                <div className="shrink-0 space-y-3 border-t border-sky-100 px-5 py-4">
+                  <button
+                    type="button"
+                    disabled={!canCreateRoute}
+                    onClick={() => void handleCreateRoute()}
+                    className="font-display flex min-h-12 w-full items-center justify-center rounded-full bg-kr-blue text-[14px] font-bold uppercase tracking-wide text-white shadow-md shadow-kr-blue/25 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {routeCreateLoading ? 'Создаём маршрут…' : 'Создать маршрут'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetBuilder()
+                      setRouteReviewOpen(false)
+                    }}
+                    className="font-display w-full rounded-full border border-sky-300 py-3 text-[12px] font-bold uppercase tracking-wide text-neutral-600"
+                  >
+                    Сбросить конструктор
+                  </button>
+                  {!token ? (
+                    <p className="text-center text-[11px] text-neutral-500">
+                      Для сохранения войдите в аккаунт (кнопка в шапке).
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

@@ -4,6 +4,150 @@
 
 ---
 
+## [2026-03-21] - Квиз: иллюстрация с CDN (quizImg1.png)
+
+**Type:** content / assets
+
+**What changed:**
+- **`src/data/quizSteps.ts`:** все шаги используют **`QUIZ_ILLUSTRATION_URL`** → `https://storage.yandexcloud.net/hackathon-ss/quizImg1.png`; удалены импорты локальных PNG из `assets/quiz/`.
+- **`front/memory_frontend.md`**, **`front/changes_frontend.md`**.
+
+**Files touched:**
+- `front/src/data/quizSteps.ts`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+---
+
+## [2026-03-21] - Квиз: 5 вопросов с нужными контролами (число, сезоны, бюджет, вид отдыха, дни)
+
+**Type:** feature / fix (quiz UX)
+
+**What changed:**
+- **`src/data/quizSteps.ts`:** ровно **5 шагов** — **«Сколько человек?»**, **«Какой сезон?»**, **«Бюджет?»**, **«Вид отдыха?»**, **«Сколько дней?»**; у каждого шага **`kind`**: `count` | `seasons` | `budget` | `radio`; сезоны — slug **`spring` / `summer` / `autumn` / `winter`** и подписи весна/лето/осень/зима; радио — Активный / Умеренный / Спокойный; удалён лишний шаг про город.
+- **`features/quiz/quizStore.ts`:** **`peopleCount`**, **`seasons[]`**, **`budget { from, to }`**, **`restType`**, **`daysCount`**; **`toggleSeason`**, **`setBudgetFrom` / `setBudgetTo`** с **`from <= to`**; **`formatSeasonLabel`**.
+- **`features/quiz/QuizPage.tsx`:** рендер по **`kind`** — `number`, чекбоксы, два **`range`**, radio; валидация **`stepIsValid`**; переход только при валидном ответе.
+- **`components/QuizNextButton.tsx`:** **`disabled`**.
+- **`pages/QuizDonePage.tsx`:** итог по новым полям.
+- Обновлены **`front/changes_frontend.md`**, **`front/memory_frontend.md`**.
+
+**Why it changed:**
+- Согласовать вопросы и типы ответов со спецификацией, без смены **`/quiz/:stepId`** и **`/quiz/done`**.
+
+**Files touched:**
+- `front/src/data/quizSteps.ts`
+- `front/src/features/quiz/quizStore.ts`
+- `front/src/features/quiz/QuizPage.tsx`
+- `front/src/components/QuizNextButton.tsx`
+- `front/src/pages/QuizDonePage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- Проход 1: `cd front && npm run lint`, `cd front && npm run build` — успешно.
+- Проход 2: повтор — успешно.
+
+---
+
+## [2026-03-21] - `/places` mobile: без крупного заголовка, одно фото в карточке, компактный экран без скролла страницы
+
+**Type:** UX / layout (mobile `/places`)
+
+**What changed:**
+- **`PlacesCatalogPage.tsx`:** на **`max-sm`** крупный **`h1`** «Места Краснодарского края» скрыт визуально (**`sr-only`**), на **`sm+`** остаётся как раньше (**`sm:not-sr-only`**); при **`phase === 'ok'`** корень страницы **`max-sm:h-dvh max-sm:overflow-hidden max-sm:flex max-sm:flex-col`**, убраны **`pb-[26rem]`** / лишний нижний отступ на мобиле; **`main`** на мобиле **`flex-1 min-h-0 overflow-hidden`**, уменьшены отступы и поле поиска; колода в **`flex-1`**-обёртке; нижняя панель маршрута на мобиле плотнее (**`py-2`**, **`gap-2`**, **`safe-area`**); текст модалки свайпа без упоминания галереи.
+- **`PlacesSwipeDeck.tsx`:** только **одно** изображение через **`getPrimaryDisplayPhotoUrl`**; убраны точки, стрелки и переключение фото; кнопки «Пропуск» / «В маршрут» и ссылка «Подробнее» перенесены **внутрь** карточки (нижняя полоса), высота колоды **`h-[min(calc(100dvh-12.5rem),78dvh)]`**; превью следующей карточки на том же primary.
+- Обновлены **`front/changes_frontend.md`**, **`front/memory_frontend.md`**.
+
+**Why it changed:**
+- Меньше шума и высоты; свайп-механика и корзина без изменений логики.
+
+**Files touched:**
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/src/components/PlacesSwipeDeck.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- Проход 1: `cd front && npm run lint`, `cd front && npm run build` — успешно.
+- Проход 2: повтор — успешно.
+
+---
+
+## [2026-03-21] - `/places`: баннер «Конструктор маршрута» заменён на toaster + одно превью якоря
+
+**Type:** UX / polish
+
+**What changed:**
+- **`PlacesCatalogPage.tsx`:** большой инлайн-блок «Конструктор маршрута» убран из потока под поиском; вместо него **toaster** через **`createPortal`** (`z-[45]`, под модалками): фиксированная плашка под шапкой на мобиле / справа сверху на **`sm+`**, закрытие по **×**, тот же текст (якорь, сезон, подсказка про свайп / «Создать маршрут»), предупреждение про сезон и ошибка рекомендаций внутри тоста; **одно изображение** — превью **якорного** места (**`AnchorToastThumb`**, primary photo или плейсхолдер).
+- Состояние **`builderToastDismissed`**: сброс при **`resetBuilder`** через **`builderStarted === false`**; если тост закрыт и рекомендации упали — компактная **красная полоса** под поиском с текстом ошибки.
+- Обновлены **`front/changes_frontend.md`**, **`front/memory_frontend.md`**.
+
+**Why it changed:**
+- Меньше забирает место у колоды/каталога; поведение ближе к ненавязчивому уведомлению.
+
+**Files touched:**
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- Проход 1: `cd front && npm run lint`, `cd front && npm run build` — успешно.
+- Проход 2: те же команды повторно — успешно.
+
+---
+
+## [2026-03-21] - `/places` (mobile): модалка подсказки свайпа, «к маршруту» + обзор маршрута, компактная шапка и бургер
+
+**Type:** UX / polish (mobile `/places`)
+
+**What changed:**
+- **`PlacesCatalogPage.tsx`:** подсказка «влево = пропуск / вправо = в маршрут» вынесена в **закрываемую модалку** с затемнённым фоном (`createPortal`, `z-[100]`, `bg-black/55`); показ **один раз за сессию** на мобиле при успешной загрузке каталога (`sessionStorage` ключ `kray-places-swipe-hint-seen`); **Escape** и клик по фону закрывают; при открытых оверлеях — **`body` overflow hidden**.
+- **Маршрут на мобиле:** полный список остановок **не показывается** в основном layout; внизу — счётчик **«В маршруте: N»** и кнопка **«к маршруту»**, открывающая **модалку обзора** со списком выбранных мест, **«Убрать»**, **«Создать маршрут»**, сбросом конструктора и текстом для гостя; десктоп — прежняя панель с чипами и **«Создать маршрут»** без изменения логики **`handleCreateRoute`** (после успеха модалка обзора закрывается).
+- **Шапка каталога на мобиле:** уменьшены вертикальные отступы и размер логотипа; навигация **скрыта за бургером** (`sm:hidden` drawer справа с теми же ссылками); на **`sm+`** — прежний горизонтальный `nav`.
+- **`PlacesSwipeDeck.tsx`:** убрана дублирующая инлайн-подсказка по свайпу (текст перенесён в модалку на странице).
+- Обновлены **`front/changes_frontend.md`**, **`front/memory_frontend.md`**.
+
+**Why it changed:**
+- Меньше визуального шума на мобильном свайпе; подсказка и обзор маршрута ощущаются как осознанные шаги; шапка компактнее.
+
+**Files touched:**
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/src/components/PlacesSwipeDeck.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- Проход 1: `cd front && npm run lint`, `cd front && npm run build` — успешно.
+- Проход 2: те же команды повторно — успешно.
+
+---
+
+## [2026-03-21] - `/places`: мобильный свайп-режим (Tinder-like) + отклонённые карточки в рекомендациях
+
+**Type:** feature / UX (mobile)
+
+**What changed:**
+- **`routeCartStore.ts`:** массив **`swipeRejectedIds`** (persist в sessionStorage вместе с корзиной), экшен **`rejectSwipePlace`**, сброс отклонений при **`resetBuilder`** и при опустошении корзины; в **`POST /places/recommendations`** на `/places` в **`exclude_place_ids`** передаются и выбранные, и отклонённые свайпом id (триггер обновления — общий **`recSignature`**).
+- **`PlacesCatalogPage.tsx`:** на **`max-sm`** колода **`PlacesSwipeDeck`** (свайп влево → пропуск, вправо → **`addPlace`** / маршрут); источник колоды — после старта конструктора сначала рекомендации, отсортированные по **`distance_km`**, затем доп. каталог; до конструктора — видимый каталог без корзины и без отклонённых; сетка конструктора и обычный каталог — только **`sm+`** (`hidden sm:grid` / `hidden sm:flex`); поиск и баннер конструктора общие; отступ снизу увеличен на мобиле под колоду и панель.
+- **`PlacesSwipeDeck.tsx`:** новый компонент — указательное перетаскивание, порог вылета, лёгкий поворот (отключается при **`prefers-reduced-motion`** через **`useSyncExternalStore`**), последовательный просмотр **`photo_urls`** (точки-индикаторы min 44×44, стрелки «‹ ›»), кнопки «Пропуск» / «В маршрут», ссылка **«Подробнее о месте»**, фоновая превью-карта следующего места.
+- Обновлены **`front/changes_frontend.md`**, **`front/memory_frontend.md`**.
+
+**Why it changed:**
+- Нужен мобильный медиа-first сценарий подбора мест с жестами и галереей фото без смены backend и с сохранением корзины/рекомендаций.
+
+**Files touched:**
+- `front/src/features/routeCart/routeCartStore.ts`
+- `front/src/pages/PlacesCatalogPage.tsx`
+- `front/src/components/PlacesSwipeDeck.tsx`
+- `front/changes_frontend.md`
+- `front/memory_frontend.md`
+
+**Testing:**
+- Проход 1: `cd front && npm run lint`, `cd front && npm run build` — успешно.
+- Проход 2: те же команды повторно — успешно.
+
+---
+
 ## [2026-03-21] - Конструктор маршрута на `/places` (корзина + рекомендации + создание маршрута)
 
 **Type:** feature

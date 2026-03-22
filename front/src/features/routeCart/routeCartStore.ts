@@ -11,6 +11,8 @@ type PlacesById = Record<string, PublicPlace>
 export type RouteCartState = {
   selectedIds: number[]
   placesById: PlacesById
+  /** Места, отклонённые свайпом влево на мобильной колоде `/places` — не в корзине, исключаются из рекомендаций и колоды. */
+  swipeRejectedIds: number[]
   anchorPlaceId: number | null
   activeSeasonSlug: string | null
   activeSeasonId: number | null
@@ -25,6 +27,7 @@ export type RouteCartState = {
 type RouteCartActions = {
   addPlace: (place: PublicPlace, opts?: { defaultSeasonSlug?: string | null }) => void
   removePlace: (id: number) => void
+  rejectSwipePlace: (id: number) => void
   resetBuilder: () => void
   setRecommendationsLoading: () => void
   setRecommendationsResult: (items: PublicPlace[]) => void
@@ -54,6 +57,7 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
     (set) => ({
       selectedIds: [],
       placesById: {},
+      swipeRejectedIds: [],
       anchorPlaceId: null,
       activeSeasonSlug: null,
       activeSeasonId: null,
@@ -86,6 +90,13 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
         })
       },
 
+      rejectSwipePlace: (id) => {
+        set((s) => {
+          if (s.swipeRejectedIds.includes(id)) return s
+          return { swipeRejectedIds: [...s.swipeRejectedIds, id] }
+        })
+      },
+
       removePlace: (id) => {
         set((s) => {
           const key = String(id)
@@ -96,6 +107,7 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
             return {
               selectedIds: [],
               placesById: {},
+              swipeRejectedIds: [],
               anchorPlaceId: null,
               activeSeasonSlug: null,
               activeSeasonId: null,
@@ -132,6 +144,7 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
         set({
           selectedIds: [],
           placesById: {},
+          swipeRejectedIds: [],
           anchorPlaceId: null,
           activeSeasonSlug: null,
           activeSeasonId: null,
@@ -172,6 +185,7 @@ export const useRouteCartStore = create<RouteCartState & RouteCartActions>()(
       partialize: (s) => ({
         selectedIds: s.selectedIds,
         placesById: s.placesById,
+        swipeRejectedIds: s.swipeRejectedIds,
         anchorPlaceId: s.anchorPlaceId,
         activeSeasonSlug: s.activeSeasonSlug,
         activeSeasonId: s.activeSeasonId,

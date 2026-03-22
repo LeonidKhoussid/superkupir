@@ -1,9 +1,16 @@
 import { Link } from 'react-router-dom'
-import { useQuizStore } from '../features/quiz/quizStore'
+import { formatSeasonLabel, useQuizStore } from '../features/quiz/quizStore'
 
 export function QuizDonePage() {
-  const answers = useQuizStore((s) => s.answers)
+  const peopleCount = useQuizStore((s) => s.peopleCount)
+  const seasons = useQuizStore((s) => s.seasons)
+  const budget = useQuizStore((s) => s.budget)
+  const restType = useQuizStore((s) => s.restType)
+  const daysCount = useQuizStore((s) => s.daysCount)
   const reset = useQuizStore((s) => s.reset)
+
+  const seasonText =
+    seasons.length > 0 ? seasons.map(formatSeasonLabel).join(', ') : '—'
 
   return (
     <div className="min-h-dvh bg-[#3b82f6] px-6 py-16 text-white">
@@ -12,15 +19,28 @@ export function QuizDonePage() {
           Готово
         </h1>
         <p className="mt-4 text-[15px] leading-relaxed text-white/90">
-          Ответы сохранены локально (мок). Дальше здесь будет подбор маршрута.
+          Ответы сохранены локально. Дальше здесь будет подбор маршрута.
         </p>
-        <ul className="mt-8 space-y-2 text-left text-sm text-white/85">
-          {Object.entries(answers).map(([step, value]) => (
-            <li key={step}>
-              <span className="font-semibold text-kr-lime">Шаг {step}:</span>{' '}
-              {value}
-            </li>
-          ))}
+        <ul className="mt-8 space-y-3 text-left text-sm text-white/90">
+          <li>
+            <span className="font-semibold text-kr-lime">Сколько человек:</span>{' '}
+            {peopleCount ?? '—'}
+          </li>
+          <li>
+            <span className="font-semibold text-kr-lime">Какой сезон:</span> {seasonText}
+          </li>
+          <li>
+            <span className="font-semibold text-kr-lime">Бюджет:</span>{' '}
+            {budget.from.toLocaleString('ru-RU')} – {budget.to.toLocaleString('ru-RU')} ₽
+          </li>
+          <li>
+            <span className="font-semibold text-kr-lime">Вид отдыха:</span>{' '}
+            {restType ?? '—'}
+          </li>
+          <li>
+            <span className="font-semibold text-kr-lime">Сколько дней:</span>{' '}
+            {daysCount ?? '—'}
+          </li>
         </ul>
         <div className="mt-10 flex flex-wrap justify-center gap-4">
           <Link

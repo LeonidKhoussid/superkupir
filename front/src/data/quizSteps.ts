@@ -1,108 +1,114 @@
-import budgetImg from '../assets/quiz/budget.png'
-import cityImg from '../assets/quiz/city.png'
-import companionImg from '../assets/quiz/companion.png'
-import durationImg from '../assets/quiz/duration.png'
-import seasonImg from '../assets/quiz/season.png'
-import tourismImg from '../assets/quiz/tourism.png'
+import type { SeasonSlug } from '../features/quiz/quizStore'
+
+/** Единая иллюстрация квиза (CDN) */
+export const QUIZ_ILLUSTRATION_URL =
+  'https://storage.yandexcloud.net/hackathon-ss/quizImg1.png'
+
+/** Одна картинка на все шаги — общие кадрирование и масштаб */
+const quizIllustrationBlock = {
+  illustration: QUIZ_ILLUSTRATION_URL,
+  illustrationPosition: '50% 50%',
+  illustrationScale: 1,
+} as const
 
 export type LogoMode = 'row-wide' | 'stack' | 'wordmark'
 
-export type QuizStepConfig = {
+type TitleLine = { text: string; tone: 'white' | 'lime' }
+
+type StepCommon = {
   id: number
   illustration: string
-  /** object-position for full mockup crop (right-side art) */
   illustrationPosition: string
   illustrationScale: number
   helper?: string
   helperPlacement?: 'left' | 'center'
   logoMode: LogoMode
-  titleLines: { text: string; tone: 'white' | 'lime' }[]
-  options: string[]
+  titleLines: TitleLine[]
 }
+
+export type QuizStepConfig =
+  | (StepCommon & {
+      kind: 'count'
+      min: number
+      max: number
+      answerKey: 'peopleCount' | 'daysCount'
+    })
+  | (StepCommon & {
+      kind: 'seasons'
+      options: readonly { slug: SeasonSlug; label: string }[]
+    })
+  | (StepCommon & {
+      kind: 'budget'
+      min: number
+      max: number
+      step: number
+    })
+  | (StepCommon & {
+      kind: 'radio'
+      options: readonly string[]
+    })
+
+export const SEASON_OPTIONS: readonly { slug: SeasonSlug; label: string }[] = [
+  { slug: 'spring', label: 'весна' },
+  { slug: 'summer', label: 'лето' },
+  { slug: 'autumn', label: 'осень' },
+  { slug: 'winter', label: 'зима' },
+] as const
+
+export const REST_TYPE_OPTIONS = ['Активный', 'Умеренный', 'Спокойный'] as const
 
 export const quizSteps: QuizStepConfig[] = [
   {
     id: 1,
-    illustration: companionImg,
-    illustrationPosition: '76% 48%',
-    illustrationScale: 1.85,
+    kind: 'count',
+    ...quizIllustrationBlock,
     helper: 'давай подберем тебе маршрут!',
     helperPlacement: 'left',
     logoMode: 'row-wide',
-    titleLines: [
-      { text: 'С КЕМ', tone: 'lime' },
-      { text: 'ПЛАНИРУЕШЬ ПОЕЗДКУ?', tone: 'white' },
-    ],
-    options: [
-      'ОДИН',
-      'С ПАРТНЁРОМ',
-      'С ДРУЗЬЯМИ',
-      'С СЕМЬЁЙ',
-      'БОЛЬШОЙ КАМПАНИЕЙ (9+ ЧЕЛ.)',
-    ],
+    titleLines: [{ text: 'Сколько человек?', tone: 'white' }],
+    min: 1,
+    max: 50,
+    answerKey: 'peopleCount',
   },
   {
     id: 2,
-    illustration: tourismImg,
-    illustrationPosition: '74% 50%',
-    illustrationScale: 1.82,
-    helper: 'давай подберем тебе маршрут!',
-    helperPlacement: 'left',
-    logoMode: 'stack',
-    titleLines: [
-      { text: 'КАКОЙ ВИД ТУРИЗМА', tone: 'white' },
-      { text: 'ВАМ', tone: 'white' },
-      { text: 'ИНТЕРЕСЕН?', tone: 'white' },
-    ],
-    options: ['АГРОТУРИЗМ', 'ВИННЫЙ', 'ГАСТРО', 'ЭКО', 'ЭКО'],
-  },
-  {
-    id: 3,
-    illustration: seasonImg,
-    illustrationPosition: '78% 52%',
-    illustrationScale: 1.9,
+    kind: 'seasons',
+    ...quizIllustrationBlock,
     helper: 'давай подберем тебе маршрут!',
     helperPlacement: 'center',
     logoMode: 'stack',
-    titleLines: [
-      { text: 'В КАКОЙ СЕЗОН ВЫ', tone: 'white' },
-      { text: 'ХОТИТЕ ПОЕХАТЬ', tone: 'white' },
-    ],
-    options: ['2-3 ДНЯ', '4-5 ДНЕЙ', '1-2 НЕДЕЛИ', 'МЕСЯЦ И БОЛЕЕ'],
+    titleLines: [{ text: 'Какой сезон?', tone: 'white' }],
+    options: SEASON_OPTIONS,
+  },
+  {
+    id: 3,
+    kind: 'budget',
+    ...quizIllustrationBlock,
+    logoMode: 'stack',
+    titleLines: [{ text: 'Бюджет?', tone: 'white' }],
+    min: 0,
+    max: 200_000,
+    step: 1000,
   },
   {
     id: 4,
-    illustration: budgetImg,
-    illustrationPosition: '78% 52%',
-    illustrationScale: 1.9,
+    kind: 'radio',
+    ...quizIllustrationBlock,
+    helper: 'давай подберем тебе маршрут!',
+    helperPlacement: 'left',
     logoMode: 'stack',
-    titleLines: [{ text: 'КАКОЙ У ВАС БЮДЖЕТ?', tone: 'white' }],
-    options: ['2-3 ДНЯ', '4-5 ДНЕЙ', '1-2 НЕДЕЛИ', 'МЕСЯЦ И БОЛЕЕ'],
+    titleLines: [{ text: 'Вид отдыха?', tone: 'white' }],
+    options: [...REST_TYPE_OPTIONS],
   },
   {
     id: 5,
-    illustration: cityImg,
-    illustrationPosition: '78% 52%',
-    illustrationScale: 1.9,
-    logoMode: 'wordmark',
-    titleLines: [
-      { text: 'ВЫБЕРИТЕ', tone: 'white' },
-      { text: 'ИНТЕРЕСУЮЩИЙ', tone: 'white' },
-      { text: 'ВАС ГОРОД', tone: 'white' },
-    ],
-    options: ['2-3 ДНЯ', '4-5 ДНЕЙ', '1-2 НЕДЕЛИ', 'МЕСЯЦ И БОЛЕЕ'],
-  },
-  {
-    id: 6,
-    illustration: durationImg,
-    illustrationPosition: '78% 52%',
-    illustrationScale: 1.9,
+    kind: 'count',
+    ...quizIllustrationBlock,
     logoMode: 'stack',
-    titleLines: [
-      { text: 'КАКОЕ ДЛЯ ВАС ОПТИМАЛЬНОЕ', tone: 'white' },
-      { text: 'ВРЕМЯ В ПУТИ?', tone: 'white' },
-    ],
-    options: ['2-3 ДНЯ', '4-5 ДНЕЙ', '1-2 НЕДЕЛИ', 'МЕСЯЦ И БОЛЕЕ'],
+    titleLines: [{ text: 'Сколько дней?', tone: 'white' }],
+    min: 1,
+    max: 30,
+    answerKey: 'daysCount',
   },
 ]
 
