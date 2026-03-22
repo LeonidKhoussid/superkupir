@@ -437,6 +437,7 @@
   - `OPTIONS`
 - Requested headers are mirrored for preflight support.
 - This now covers route editing endpoints that use `PATCH`, in addition to the earlier auth and unlike flows.
+- **Private Network Access (Chrome):** если страница открыта с **публичного IP/домена** (типично `npm run preview --host`), а клиент шлёт `fetch` на **`http://localhost:3000`**, браузер режет запрос (в консоли часто выглядит как CORS и *«resource is in more-private address space `loopback`»*) — это ограничение браузера, не отсутствие заголовков на бэке. SPA должна звать API на **тот же публичный хост** (порт **`PORT`**) или задать **`VITE_API_BASE_URL`**. Реализация на фронте: **`front/src/lib/apiBaseUrl.ts`**, описание — **`front/memory_frontend.md`**.
 
 # Env variables used by backend
 

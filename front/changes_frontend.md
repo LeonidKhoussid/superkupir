@@ -1187,3 +1187,24 @@
 - `front/memory_frontend.md`
 
 ---
+
+## [2026-03-22] - API base URL: posts + dev vs preview (Private Network Access)
+
+**Type:** fix / docs
+
+**What changed:**
+- **`postsApi.ts`** переведён на **`getApiBaseUrl()`** (раньше оставался дефолт **`http://localhost:3000`**, из‑за чего при **`npm run preview`** по IP запросы шли на loopback и ломались).
+- **`getApiBaseUrl()`**: при **`import.meta.env.DEV`** (`npm run dev`) — **`http://127.0.0.1:PORT`**; при production-бандле / **`npm run preview`** — **`protocol//hostname:PORT`** как у страницы (обход Chrome **Private Network Access** для публичного origin → localhost).
+- Обновлены **`readme.md`**, **`memory_frontend.md`**, этот файл.
+
+**Why it changed:**
+- Ошибка CORS / PNA в консоли при ленте постов и **`POST /posts`** со страницы **`http://<сервер>:4173`** на **`http://localhost:3000`**.
+
+**Files touched:**
+- `front/src/lib/apiBaseUrl.ts`
+- `front/src/features/posts/postsApi.ts`
+- `front/readme.md`
+- `front/memory_frontend.md`
+- `front/changes_frontend.md`
+
+---

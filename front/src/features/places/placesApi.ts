@@ -1,6 +1,6 @@
 /**
  * Клиент для публичных read-only эндпоинтов мест (см. back/memory_backend.md: GET /places, GET /places/:id).
- * База URL: VITE_API_BASE_URL или тот же хост, что у страницы, порт 3000 (см. getApiBaseUrl).
+ * База URL: см. getApiBaseUrl() — dev → 127.0.0.1, preview/prod → хост страницы, override через VITE_API_BASE_URL.
  */
 
 import { getApiBaseUrl } from '../../lib/apiBaseUrl'

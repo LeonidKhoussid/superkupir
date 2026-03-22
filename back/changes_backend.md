@@ -1,3 +1,17 @@
+[2026-03-22] - Док: Chrome Private Network Access vs публичный frontend + `localhost` API
+
+Type: docs
+
+What changed:
+	•	**`memory_backend.md`** (раздел CORS/browser): пояснение, что блокировка запросов с публичной страницы на **`http://localhost:3000`** — ограничение браузера (PNA), а не CORS middleware; ссылка на **`front/src/lib/apiBaseUrl.ts`** и **`front/memory_frontend.md`**.
+
+Why it changed:
+	•	При **`vite preview --host`** и доступе по IP консоль показывала CORS/PNA на посты и другие `fetch` к loopback; бэкенд при этом мог быть настроен корректно.
+
+Files touched: `back/memory_backend.md`, `back/changes_backend.md`
+
+⸻
+
 [2026-03-22] - Совместное редактирование по шарингу: OpenAPI + согласование доков с `route_access` / `revision_number`
 
 Type: docs (OpenAPI + markdown; поведение модуля routes без изменений в этой записи)

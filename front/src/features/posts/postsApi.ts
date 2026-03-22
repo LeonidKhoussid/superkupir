@@ -2,7 +2,9 @@
  * Посты: GET /posts (публично), POST /posts (JWT) — см. back/modules/posts, createPostSchema.
  */
 
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '')
+import { getApiBaseUrl } from '../../lib/apiBaseUrl'
+
+const apiBaseUrl = getApiBaseUrl()
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null

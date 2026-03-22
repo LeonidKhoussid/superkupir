@@ -15,6 +15,16 @@ SPA «Край Тур»: лендинг с hero, квиз из пяти шаго
 - **Zustand** — auth state (`features/auth/authStore.ts`) для `{ user, token }`
 - Локальное состояние компонентов — interaction hydration, like-toggle и comments modal для landing places carousel
 
+## Backend API base URL (`src/lib/apiBaseUrl.ts`, `getApiBaseUrl`)
+
+Все HTTP-клиенты к бэку (**`authApi`**, **`catalogApi`**, **`placesApi`**, **`placeInteractionsApi`**, **`routesApi`**, **`postsApi`**) берут базовый origin через **`getApiBaseUrl()`**.
+
+- **`VITE_API_BASE_URL`** — если задан в `.env`, используется он (отдельный домен, nginx, и т.д.).
+- **`npm run dev`** (`import.meta.env.DEV`): **`http://127.0.0.1:${VITE_API_PORT||3000}`** — локальный бэкенд на машине разработчика.
+- **`npm run preview`** и **production**-бандл: **`${location.protocol}//${location.hostname}:${порт}`** — тот же хост, что у открытой вкладки. Иначе при странице вида **`http://<публичный-IP>:4173`** запросы на **`http://localhost:3000`** режет Chrome (**Private Network Access** / *request client is not a secure context and the resource is in more-private address space `loopback`*): публичный сайт не должен тянуть loopback на машине клиента.
+- На VPS откройте входящий TCP-порт бэка (**3000** по умолчанию), если заходите по IP.
+- **`vite dev --host`** с другого устройства: hostname страницы не совпадает с loopback машины разработчика — задайте **`VITE_API_BASE_URL`** на достижимый с телефона URL API.
+
 ## Pages / screens
 
 | Маршрут            | Компонент        | Описание                          |
@@ -39,7 +49,7 @@ SPA «Край Тур»: лендинг с hero, квиз из пяти шаго
 - **`LandingPage` секция `#how`:** правки только с префиксом **`max-sm:`** (колонка, ширина текста, картинка); **`sm:`** и выше — прежний горизонтальный **`flex`** + **`gap-12`**.
 - `features/places/placesApi.ts` — `GET /places` / `GET /places/:id`. Ответ списка: объект `{ items, total, limit, offset }` (не массив). Поля мест в **snake_case** как у API. **Нормализация на фронте:** `id` и при необходимости `total`/`limit`/`offset`/`lat`/`lon` могут приходить **строками** (например BIGINT в JSON) — парсер приводит к числам; невалидные строки в `items` отбрасываются. `photo_urls` — массив строк, иначе `[]`. **`PublicPlace`** больше не содержит `external_id`; канонический идентификатор места на фронте — только числовой `id`. Остальные поля контракта: `season_slugs`, `type_slug`, `short_description`, `estimated_cost`, `estimated_duration_minutes`, `radius_group`, `is_active`. **`fetchPlaceRecommendations`** — **`POST /places/recommendations`** (публичный): тело с **`season_slug` или `season_id`**, опционально `anchor_place_id`, **`type_slug`** (фильтр по категории места), `exclude_place_ids`, `radius_km`, `limit`; ответные элементы парсятся как **`PublicPlaceRecommendation`** (поле **`distance_km`**); опционально **`recommendation_broad_fallback`**. Хелпер **`formatRecommendationDistanceKm`** — подпись расстояния в UI. Primary-картинка для витрины и каталога: **`getPrimaryDisplayPhotoUrl`** (первый непустой `photo_urls[0]` после trim); **`placeHasDisplayablePhoto`** = наличие этого URL; **`orderPlacesByCatalogImagePriority`** — сортировка каталога по уникальности primary URL. **`prioritizePlacesWithPhotos`** — карусель. Для карты: **`placeHasValidCoordinates`** / **`getPlaceLatLon`**. Размер страницы для секции-эксплорера: **`PLACES_PAGE_SIZE_EXPLORER`** (25). Для каталога: **`PLACES_CATALOG_FETCH_LIMIT`** (24) используется только для быстрой первой страницы, затем фоновые догрузки идут с **`PLACES_BACKGROUND_FETCH_LIMIT`** (100). `appendUniquePlaces(...)` дедупит страницы по `id`. `fetchAllPlaces()` оставлен как вспомогательный helper, но основной `/places` UI больше не ждёт полной загрузки всех страниц перед первым рендером.
 - **`features/catalog/catalogApi.ts`** — **`fetchSeasons`**: `GET /seasons` → `{ items: { id, name, slug }[] }` для fallback сезона в конструкторе маршрута и сопоставления slug → id.
-- **`features/posts/postsApi.ts`** — публичный **`GET /posts`** (опционально **`mine`** с JWT), парсинг списка **`PublicPostItem`**.
+- **`features/posts/postsApi.ts`** — публичный **`GET /posts`** (опционально **`mine`** с JWT), парсинг списка **`PublicPostItem`**; база URL через **`getApiBaseUrl()`** (как у остальных API-клиентов).
 - **`features/posts/postPlaceHydration.ts`** — сопоставление **`post.image_urls`** с **`PublicPlace.photo_urls`** (нормализация URL), порядок слотов как в посте.
 - **`pages/ImpressionsPage.tsx`** — лента впечатлений **`/impressions`**; мини-навигация (лента / **«Мои посты»**); CTA **`Построить маршрут`** через **`createRouteFromSelection`**.
 - **`components/ImpressionsMyPostsTab.tsx`** — вкладка создания поста из **своего** маршрута (**`scope=owned`**), превью остановок, **`createPost`**.

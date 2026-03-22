@@ -1,3 +1,4 @@
+import { randomClientId } from '../../lib/randomClientId'
 import type { PublicPlace } from '../places/placesApi'
 import type { RoutePlaceRow, UserRouteDetail } from './routesApi'
 
@@ -23,7 +24,7 @@ export function stopsFromUserRoute(route: UserRouteDetail): EditableRouteStop[] 
 
 export function newClientRouteStop(place: PublicPlace): EditableRouteStop {
   return {
-    key: `n-${crypto.randomUUID()}`,
+    key: `n-${randomClientId()}`,
     serverRoutePlaceId: null,
     place,
   }
