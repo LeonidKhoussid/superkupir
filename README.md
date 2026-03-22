@@ -1,8 +1,8 @@
 Потом напишу ридми + запуск. А пока структура!
 
+```
 /KrayTur_ML/
 │
-├─ .env
 ├─ .gitattributes
 ├─ .gitignore
 ├─ app
@@ -104,3 +104,4 @@
 └─ tests
    ├─ test_quiz_route_api.py
    └─ test_quiz_route_engine.py
+```
